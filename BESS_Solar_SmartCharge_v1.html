@@ -2133,7 +2133,16 @@ function exportPDF() {
     // Switch to this tab
     showTab(t.pane.replace('pane-',''));
 
-    // Wait for render (charts need a frame)
+    // If this is the chart tab, explicitly resize all chart instances so
+    // Chart.js re-renders at the correct width before capture
+    if(t.pane === 'pane-chart') {
+      [mainChartInst, finChartInst, bessChartInst, bessChargeChartInst].forEach(function(ch){
+        if(ch) ch.resize();
+      });
+    }
+
+    // Wait for render (charts need extra time to resize from display:none)
+    var delay = (t.pane === 'pane-chart') ? 600 : 350;
     setTimeout(function(){
       var paneEl = document.getElementById(t.pane);
 
@@ -2196,7 +2205,7 @@ function exportPDF() {
         addWatermark();
         captureTab(idx + 1);
       });
-    }, 350);
+    }, delay);
   }
 
   captureTab(0);
