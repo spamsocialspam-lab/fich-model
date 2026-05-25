@@ -2101,6 +2101,16 @@ function exportPDF() {
   var btn = document.getElementById('calcBtn');
   if(btn) btn.textContent='⏳ PDF...';
 
+  function addWatermark() {
+    doc.saveGraphicsState();
+    doc.setGState(new doc.GState({opacity: 0.08}));
+    doc.setFontSize(28);
+    doc.setTextColor(93, 109, 126);
+    doc.text('LIVOLTEKUKRAINE.COM', pageW / 2, pageH / 2, {align:'center', angle:30});
+    doc.restoreGraphicsState();
+    doc.setTextColor(0, 0, 0);
+  }
+
   function captureTab(idx) {
     if(idx >= tabs.length) {
       // Restore original active tab
@@ -2116,14 +2126,32 @@ function exportPDF() {
     // Wait for render (charts need a frame)
     setTimeout(function(){
       var paneEl = document.getElementById(t.pane);
+
+      // Timeout failsafe: if html2canvas hangs (e.g. CORS issue on GitHub Pages), skip after 10s
+      var timedOut = false;
+      var timeoutId = setTimeout(function(){
+        timedOut = true;
+        console.warn('html2canvas timed out on tab: ' + t.label + ', skipping.');
+        if(idx > 0) doc.addPage();
+        doc.setFontSize(10);
+        doc.setTextColor(150, 150, 150);
+        doc.text('(сторінка недоступна)', pageW / 2, pageH / 2, {align:'center'});
+        addWatermark();
+        captureTab(idx + 1);
+      }, 10000);
+
       html2canvas(paneEl, {
         scale:1.5,
         useCORS:true,
+        allowTaint:true,
         backgroundColor:'#f0f2f5',
         scrollY:0,
         windowWidth: paneEl.scrollWidth,
         height: paneEl.scrollHeight
       }).then(function(canvas){
+        if(timedOut) return; // already moved on
+        clearTimeout(timeoutId);
+
         if(idx>0) doc.addPage();
 
         // Header strip
@@ -2143,7 +2171,21 @@ function exportPDF() {
         var xOff = (pageW - imgW) / 2;
 
         doc.addImage(canvas.toDataURL('image/jpeg',0.92), 'JPEG', xOff, headerH, imgW, imgH);
+
+        // Watermark overlay
+        addWatermark();
+
         captureTab(idx+1);
+      }).catch(function(err){
+        if(timedOut) return;
+        clearTimeout(timeoutId);
+        console.warn('html2canvas error on tab: ' + t.label, err);
+        if(idx > 0) doc.addPage();
+        doc.setFontSize(10);
+        doc.setTextColor(150, 150, 150);
+        doc.text('(помилка рендерингу)', pageW / 2, pageH / 2, {align:'center'});
+        addWatermark();
+        captureTab(idx + 1);
       });
     }, 350);
   }
