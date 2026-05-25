@@ -96,39 +96,6 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
-
-<!-- PASSWORD GATE -->
-<div id="pwd-overlay" style="position:fixed;inset:0;background:#2C3E50;display:flex;align-items:center;justify-content:center;z-index:99999;">
-  <div style="background:#fff;border-radius:10px;padding:40px 48px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.4);min-width:320px;">
-    <div style="font-size:28px;margin-bottom:8px;">⚡</div>
-    <div style="font-size:18px;font-weight:700;color:#2C3E50;margin-bottom:4px;">Fich Energy</div>
-    <div style="font-size:13px;color:#888;margin-bottom:24px;">Financial Model — Restricted Access</div>
-    <input id="pwd-input" type="password" placeholder="Enter password"
-      style="width:100%;padding:10px 14px;border:1px solid #ccc;border-radius:5px;font-size:14px;margin-bottom:12px;text-align:center;outline:none;">
-    <div id="pwd-error" style="color:#c0392b;font-size:12px;margin-bottom:10px;min-height:16px;"></div>
-    <button onclick="checkPassword()"
-      style="width:100%;padding:11px;background:#C55A11;color:#fff;border:none;border-radius:5px;font-size:14px;font-weight:700;cursor:pointer;">
-      Access Model
-    </button>
-  </div>
-</div>
-<script>
-  document.getElementById('pwd-input').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') checkPassword();
-  });
-  function checkPassword() {
-    var val = document.getElementById('pwd-input').value;
-    if (val === 'LivolTEK1!') {
-      document.getElementById('pwd-overlay').style.display = 'none';
-    } else {
-      document.getElementById('pwd-error').textContent = 'Incorrect password. Please try again.';
-      document.getElementById('pwd-input').value = '';
-      document.getElementById('pwd-input').focus();
-    }
-  }
-</script>
-<!-- END PASSWORD GATE -->
-
 <div class="hdr">
   <div>
     <h1>⚡ BESS + Сонячна Електростанція — Фінансова Модель</h1>
@@ -772,9 +739,11 @@ function renderBP(M,p) {
   yb+='<tr class="cf"><td>ГРОШОВИЙ ПОТІК</td><td>'+fu(-capex)+'</td>';
   for(i=0;i<10;i++) yb+='<td>'+fu(yCF[i])+'</td>';
   yb+='</tr>';
-  var cum2=-capex;
-  yb+='<tr class="cum"><td>Накопичений</td><td>'+fu(cum2)+'</td>';
-  for(i=0;i<10;i++){cum2+=yCF[i]; yb+='<td style="color:'+(cum2>=0?'#2e7d32':'#c62828')+'">'+fu(cum2)+'</td>';}
+  // Build cumulative CF array for rendering and payback interpolation
+  var cumArr=[], cumVal=-capex;
+  for(i=0;i<10;i++){cumVal+=yCF[i]; cumArr.push(cumVal);}
+  yb+='<tr class="cum"><td>Накопичений</td><td>'+fu(-capex)+'</td>';
+  for(i=0;i<10;i++) yb+='<td style="color:'+(cumArr[i]>=0?'#2e7d32':'#c62828')+'">'+fu(cumArr[i])+'</td>';
   yb+='</tr>';
 
   // KPIs
@@ -782,7 +751,13 @@ function renderBP(M,p) {
   for(i=0;i<10;i++){tot10Rev+=yRevComb[i]; tot10Cost+=yCost[i]+yMaint[i];}
   var net10=tot10Rev+tot10Cost;
   var roi=capex>0?net10/capex/10*100:0;
-  var pb=roi>0?1/roi*100:999;
+
+  // Payback: interpolate from cumulative CF (accounts for uneven yearly cashflows)
+  var pb=999, prevCum=-capex;
+  for(i=0;i<10;i++){
+    if(cumArr[i]>=0){ pb=i+Math.abs(prevCum)/(Math.abs(prevCum)+cumArr[i]); break; }
+    prevCum=cumArr[i];
+  }
 
   yb+='<tr style="height:10px"></tr>';
   yb+='<tr class="kpi"><td>Загальний CAPEX</td><td>'+fu(capex)+'</td><td colspan="10"></td></tr>';
@@ -1853,7 +1828,7 @@ function renderChart(M, p) {
         }
       },
       scales:{
-        x:{grid:{display:false}, ticks:{font:{size:12}, autoSkip:false}},
+        x:{grid:{display:false}, ticks:{font:{size:12}}},
         y:{
           title:{display:true, text:'кВт·год / місяць', font:{size:11}},
           ticks:{font:{size:11}, callback:function(v){return (v/1000).toFixed(0)+'k';}},
@@ -1900,7 +1875,7 @@ function renderChart(M, p) {
         }
       },
       scales:{
-        x:{grid:{display:false}, ticks:{font:{size:12}, autoSkip:false}},
+        x:{grid:{display:false}, ticks:{font:{size:12}}},
         y:{
           title:{display:true, text:'тис. грн / місяць', font:{size:11}},
           ticks:{font:{size:11}},
@@ -1945,7 +1920,7 @@ function renderChart(M, p) {
           }
         },
         scales:{
-          x:{grid:{display:false}, ticks:{font:{size:12}, autoSkip:false}},
+          x:{grid:{display:false}, ticks:{font:{size:12}}},
           y:{
             beginAtZero:true,
             title:{display:true, text:'кВт·год / день', font:{size:11}},
@@ -2011,7 +1986,7 @@ function renderChart(M, p) {
           }
         },
         scales:{
-          x:{grid:{display:false}, ticks:{font:{size:12}, autoSkip:false}},
+          x:{grid:{display:false}, ticks:{font:{size:12}}},
           y:{
             beginAtZero:true,
             stacked:true,
@@ -2101,26 +2076,6 @@ function exportPDF() {
   var btn = document.getElementById('calcBtn');
   if(btn) btn.textContent='⏳ PDF...';
 
-  function addWatermark() {
-    doc.saveGraphicsState();
-    doc.setGState(new doc.GState({opacity: 0.07}));
-    doc.setFontSize(14);
-    doc.setTextColor(93, 109, 126);
-    // Tile watermark in a grid across the page
-    var cols = 3, rows = 3;
-    var stepX = pageW / cols;
-    var stepY = pageH / rows;
-    for(var r = 0; r < rows; r++) {
-      for(var c = 0; c < cols; c++) {
-        var cx = stepX * c + stepX / 2;
-        var cy = stepY * r + stepY / 2;
-        doc.text('LIVOLTEKUKRAINE.COM', cx, cy, {align:'center', angle:30});
-      }
-    }
-    doc.restoreGraphicsState();
-    doc.setTextColor(0, 0, 0);
-  }
-
   function captureTab(idx) {
     if(idx >= tabs.length) {
       // Restore original active tab
@@ -2133,32 +2088,9 @@ function exportPDF() {
     // Switch to this tab
     showTab(t.pane.replace('pane-',''));
 
-    // If this is the chart tab, explicitly resize all chart instances so
-    // Chart.js re-renders at the correct width before capture
-    if(t.pane === 'pane-chart') {
-      [mainChartInst, finChartInst, bessChartInst, bessChargeChartInst].forEach(function(ch){
-        if(ch) ch.resize();
-      });
-    }
-
-    // Wait for render (charts need extra time to resize from display:none)
-    var delay = (t.pane === 'pane-chart') ? 600 : 350;
+    // Wait for render (charts need a frame)
     setTimeout(function(){
       var paneEl = document.getElementById(t.pane);
-
-      // Timeout failsafe: if html2canvas hangs (e.g. CORS issue on GitHub Pages), skip after 10s
-      var timedOut = false;
-      var timeoutId = setTimeout(function(){
-        timedOut = true;
-        console.warn('html2canvas timed out on tab: ' + t.label + ', skipping.');
-        if(idx > 0) doc.addPage();
-        doc.setFontSize(10);
-        doc.setTextColor(150, 150, 150);
-        doc.text('(сторінка недоступна)', pageW / 2, pageH / 2, {align:'center'});
-        addWatermark();
-        captureTab(idx + 1);
-      }, 10000);
-
       html2canvas(paneEl, {
         scale:1.5,
         useCORS:true,
@@ -2167,9 +2099,6 @@ function exportPDF() {
         windowWidth: paneEl.scrollWidth,
         height: paneEl.scrollHeight
       }).then(function(canvas){
-        if(timedOut) return; // already moved on
-        clearTimeout(timeoutId);
-
         if(idx>0) doc.addPage();
 
         // Header strip
@@ -2189,23 +2118,9 @@ function exportPDF() {
         var xOff = (pageW - imgW) / 2;
 
         doc.addImage(canvas.toDataURL('image/jpeg',0.92), 'JPEG', xOff, headerH, imgW, imgH);
-
-        // Watermark overlay
-        addWatermark();
-
         captureTab(idx+1);
-      }).catch(function(err){
-        if(timedOut) return;
-        clearTimeout(timeoutId);
-        console.warn('html2canvas error on tab: ' + t.label, err);
-        if(idx > 0) doc.addPage();
-        doc.setFontSize(10);
-        doc.setTextColor(150, 150, 150);
-        doc.text('(помилка рендерингу)', pageW / 2, pageH / 2, {align:'center'});
-        addWatermark();
-        captureTab(idx + 1);
       });
-    }, delay);
+    }, 350);
   }
 
   captureTab(0);
