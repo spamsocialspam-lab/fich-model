@@ -2049,7 +2049,8 @@ function getClientData() {
     ['fx',       gi('fx')],
     ['corr',     gi('corr')],
     ['scEnd',    gi('scEnd')],
-    ['scMode',   toggleState.sc]
+    ['scMode',   toggleState.sc],
+    ['modelName', document.getElementById('modelName').value.trim()]
   ];
   for(var i=0;i<12;i++) data.push(['cons_'+i, gi('cons'+i)]);
   for(var i=0;i<12;i++) data.push(['sol_'+i,  gi('sol'+i)]);
@@ -2178,6 +2179,7 @@ function importClient(event) {
       for(var i=0;i<10;i++){
         if(map['deg_'+i]!==undefined){var de=document.getElementById('deg'+i);if(de)de.value=map['deg_'+i];}
       }
+      if(map['modelName']!==undefined){var mn=document.getElementById('modelName');if(mn)mn.value=map['modelName'];}
       updateCalc(); runModel();
       alert('Дані клієнта завантажено!');
     } catch(err){ alert('Помилка: '+err.message); }
