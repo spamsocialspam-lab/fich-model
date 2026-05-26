@@ -101,6 +101,7 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
 <div id="gate">
@@ -152,7 +153,14 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
       <button class="tgbtn" data-tg="sc" data-val="1" onclick="setToggle('sc',1);updateSmartChargeUI()">⚡ SmartCharge</button>
     </div>
   </div>
-  <div class="row" id="scEndRow" style="display:none"><span class="lbl">SmartCharge: заряд до год.</span><input class="inp" id="scEnd" value="17"><span class="unit">год (до розряду)</span></div>
+  <div class="row" id="scEndRow" style="display:none"><span class="lbl">SmartCharge: заряд до год.</span><input class="inp" id="scEnd" value="17" oninput="updateCalc()"><span class="unit">год (до розряду)</span></div>
+  <div class="trow">
+    <span class="lbl">Режим розряду</span>
+    <div class="tgrow">
+      <button class="tgbtn on" data-tg="sd" data-val="0" onclick="setToggle('sd',0)">Рівномірний</button>
+      <button class="tgbtn" data-tg="sd" data-val="1" onclick="setToggle('sd',1)">⚡ SmartDischarge</button>
+    </div>
+  </div>
 </div></div>
 
 <div class="card">
@@ -238,8 +246,8 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
 <tr style="background:#EBF0F5">
   <th style="padding:7px 10px;text-align:left;width:100px">Місяць</th>
   <th style="padding:7px 10px;text-align:center;width:120px">Статус</th>
-  <th style="padding:7px 10px;text-align:right;width:130px">Сер. розряд<br><span style="font-weight:normal;color:#888">(19-22 год)</span></th>
-  <th style="padding:7px 10px;text-align:right;width:130px">Сер. топ-ап<br><span style="font-weight:normal;color:#888">(17-18 год)</span></th>
+  <th id="hdrDch" style="padding:7px 10px;text-align:right;width:130px">Сер. розряд<br><span style="font-weight:normal;color:#888">(19-22 год)</span></th>
+  <th id="hdrTu" style="padding:7px 10px;text-align:right;width:130px">Сер. топ-ап<br><span style="font-weight:normal;color:#888">(17-18 год)</span></th>
   <th style="padding:7px 10px;text-align:right;width:130px">Сер. сонячна<br><span style="font-weight:normal;color:#888">(зважена)</span></th>
   <th style="padding:7px 10px;text-align:center">Дія</th>
 </tr>
@@ -335,7 +343,7 @@ function showTab(name) {
 }
 
 // Toggle buttons
-var toggleState = {pm:0, vm:0, dm:0, sc:0};
+var toggleState = {pm:0, vm:0, dm:0, sc:0, sd:0};
 function setToggle(key, val) {
   toggleState[key] = val;
   var btns = document.querySelectorAll('[data-tg="'+key+'"]');
@@ -361,6 +369,8 @@ function updateSmartChargeUI() {
     if (inp) { inp.disabled = sc; inp.style.cursor = sc ? 'not-allowed' : ''; }
   });
   validateInputs();
+  updateDAMHeaders();
+  if(typeof buildPriceTable==='function') buildPriceTable();
 }
 
 function validateInputs() {
@@ -415,6 +425,43 @@ function validateInputs() {
   }
 }
 
+// ── Dynamic DAM stats helpers ──────────────────────────────────────────────
+function getDchHoursArr() {
+  var s=gi('dchStart'), e=gi('dchEnd'), arr=[], h;
+  for(h=s; h<=e; h++) arr.push(h);
+  return arr.length ? arr : [19,20,21,22];
+}
+
+function getChargeHoursArr() {
+  var sc = toggleState.sc===1;
+  var arr=[], h;
+  if(sc) {
+    // SmartCharge: eligible pool is [1..scEnd] excluding discharge window
+    var scE=gi('scEnd')||17, dS=gi('dchStart'), dE=gi('dchEnd');
+    for(h=1; h<=scE; h++) {
+      if(h<dS || h>dE) arr.push(h);
+    }
+  } else {
+    var tuS=gi('tuStart'), tuE=gi('tuEnd');
+    for(h=tuS; h<=tuE; h++) arr.push(h);
+  }
+  return arr.length ? arr : [17,18];
+}
+
+function updateDAMHeaders() {
+  var dS=gi('dchStart'), dE=gi('dchEnd');
+  var sc=toggleState.sc===1, scE=gi('scEnd')||17;
+  var tuS=gi('tuStart'), tuE=gi('tuEnd');
+  var dHdr=document.getElementById('hdrDch');
+  var tHdr=document.getElementById('hdrTu');
+  if(dHdr) dHdr.querySelector('span').textContent='('+dS+'–'+dE+' год)';
+  if(tHdr) {
+    if(sc) tHdr.querySelector('span').textContent='(1–'+scE+' SmartCharge)';
+    else   tHdr.querySelector('span').textContent='('+tuS+'–'+tuE+' год)';
+  }
+}
+// ──────────────────────────────────────────────────────────────────────────
+
 // Read input value
 function gi(id) {
   var el = document.getElementById(id);
@@ -457,6 +504,7 @@ function simMonth(mi, p) {
   var prMonth=getActivePrices(mi);
   var pmode=toggleState.pm, fp=p.fixPrice;
   var sc=toggleState.sc===1;
+  var sd=p.sdMode===1;
   var scEnd=p.scEnd>0?p.scEnd:(p.dchStart-1);
   var nChHours=sc&&hasB?Math.max(1,Math.ceil(usable/Math.max(p.maxPow,1))):0;
 
@@ -464,8 +512,10 @@ function simMonth(mi, p) {
          grid:0,gridCost:0,eveDch:0,eveRev:0,solRev:0};
 
   var d,h,pr,bess,sh,cHr,toSite,surplus,tb,tbSol,tbGrd,space,ePH;
+  var sdPerHrDay,hh2,dOpts,di,bessLeft,shD,cHrD,unmetD,assign,dchLimit;
   for (d=0; d<nd; d++) {
     pr = prMonth[String(d)] || [];
+    sdPerHrDay={};
 
     if (sc && hasB) {
       // ── SmartCharge mode ───────────────────────────────────────────────────
@@ -486,6 +536,24 @@ function simMonth(mi, p) {
       }
       var dchPerHrSC=dchN>0?Math.min(bessPreSC/dchN,consHr):0;
 
+      // SmartDischarge: rank discharge hours by DAM price for this day
+      if(sd && hasB && bessPreSC>0){
+        dOpts=[];
+        for(hh2=p.dchStart;hh2<=p.dchEnd;hh2++){
+          shD=(wt[hh2]||0)*spd;
+          cHrD=(hh2>=p.wStart&&hh2<=p.wEnd)?consHr:0;
+          unmetD=Math.max(0,cHrD-shD);
+          if(unmetD>0) dOpts.push([hh2,(pr[hh2-1]||0),unmetD]);
+        }
+        dOpts.sort(function(a,b){return b[1]-a[1];});
+        bessLeft=bessPreSC;
+        for(di=0;di<dOpts.length&&bessLeft>0;di++){
+          assign=Math.min(bessLeft,dOpts[di][2]);
+          sdPerHrDay[dOpts[di][0]]=assign;
+          bessLeft-=assign;
+        }
+      }
+
       // Step 3: simulate hour by hour
       bess=0;
       for(h=1;h<=24;h++){
@@ -496,8 +564,9 @@ function simMonth(mi, p) {
         var inDchSC=(h>=p.dchStart&&h<=p.dchEnd);
 
         if(inDchSC){
-          // Discharge evenly using pre-calculated rate
-          ePH=Math.min(dchPerHrSC,Math.max(0,cHr-toSite),bess);
+          // Discharge: SmartDischarge (price-ranked) or equal
+          dchLimit=sd?(sdPerHrDay[h]||0):dchPerHrSC;
+          ePH=Math.min(dchLimit,Math.max(0,cHr-toSite),bess);
           bess-=ePH;
           R.eveDch+=ePH;
           R.eveRev+=ePH*(pr[h-1]||0)/1000; // always DAM price for BESS discharge
@@ -535,6 +604,24 @@ function simMonth(mi, p) {
       }
       var dchPerHr=hasB&&dchN>0?Math.min(bessBefore/dchN,consHr):0;
 
+      // SmartDischarge: rank discharge hours by DAM price for this day
+      if(sd && hasB && bessBefore>0){
+        dOpts=[];
+        for(hh2=p.dchStart;hh2<=p.dchEnd;hh2++){
+          shD=(wt[hh2]||0)*spd;
+          cHrD=(hh2>=p.wStart&&hh2<=p.wEnd)?consHr:0;
+          unmetD=Math.max(0,cHrD-shD);
+          if(unmetD>0) dOpts.push([hh2,(pr[hh2-1]||0),unmetD]);
+        }
+        dOpts.sort(function(a,b){return b[1]-a[1];});
+        bessLeft=bessBefore;
+        for(di=0;di<dOpts.length&&bessLeft>0;di++){
+          assign=Math.min(bessLeft,dOpts[di][2]);
+          sdPerHrDay[dOpts[di][0]]=assign;
+          bessLeft-=assign;
+        }
+      }
+
       bess=0;
       for(h=1;h<=24;h++){
         sh=(wt[h]||0)*spd;
@@ -546,7 +633,8 @@ function simMonth(mi, p) {
         var inSol=(h<=p.solEnd&&!inDch&&!inTu);
 
         if(inDch){
-          ePH=hasB?Math.min(dchPerHr,Math.max(0,cHr-toSite),bess):0;
+          dchLimit=sd?(sdPerHrDay[h]||0):dchPerHr;
+          ePH=hasB?Math.min(dchLimit,Math.max(0,cHr-toSite),bess):0;
           bess-=ePH;
           R.eveDch+=ePH;
           var pkDch=pmode===0?(pr[h-1]||0)/1000:fp;
@@ -616,6 +704,7 @@ function runModel() {
     fx:       gi('fx'),
     corrPct:  gi('corr')/100,
     scEnd:    gi('scEnd'),
+    sdMode:   toggleState.sd,
     cons:     [], solar: [], degrad: []
   };
   var i;
@@ -865,6 +954,8 @@ function updateCalc(){
   var ce=document.getElementById('capexTot'); if(ce) ce.textContent='$'+f0(capex);
   var ue=document.getElementById('usable'); if(ue) ue.textContent=f0(gi('inst')*0.9);
   validateInputs();
+  updateDAMHeaders();
+  if(typeof buildPriceTable==='function') buildPriceTable();
 }
 
 
@@ -891,6 +982,7 @@ function resetAll() {
   document.getElementById('dchStart').value = 19;
   document.getElementById('dchEnd').value   = 22;
   setToggle('sc', 0);
+  setToggle('sd', 0);
   var scEl=document.getElementById('scEnd'); if(scEl) scEl.value=17;
   updateSmartChargeUI();
 
@@ -989,8 +1081,8 @@ function buildPriceTable() {
   for(i=0;i<12;i++){
     var nd=M_DAYS_P[i];
     var data=getActivePrices(i);
-    var dchAvg=priceAvg(data,nd,[19,20,21,22]);
-    var tuAvg=priceAvg(data,nd,[17,18]);
+    var dchAvg=priceAvg(data,nd,getDchHoursArr());
+    var tuAvg=priceAvg(data,nd,getChargeHoursArr());
     var solAvg=solAvgPrice(data,nd,i);
     var isLoaded=!!loadedPrices[i];
     var statusHtml=isLoaded?
@@ -1031,8 +1123,8 @@ function resetAllPrices() {
 function updatePriceRow(mi) {
   var nd=M_DAYS_P[mi];
   var data=getActivePrices(mi);
-  var dchAvg=priceAvg(data,nd,[19,20,21,22]);
-  var tuAvg=priceAvg(data,nd,[17,18]);
+  var dchAvg=priceAvg(data,nd,getDchHoursArr());
+  var tuAvg=priceAvg(data,nd,getChargeHoursArr());
   var solAvg=solAvgPrice(data,nd,mi);
   var isLoaded=!!loadedPrices[mi];
 
@@ -1191,6 +1283,7 @@ function resetAll() {
   document.getElementById('dchStart').value = 19;
   document.getElementById('dchEnd').value   = 22;
   setToggle('sc', 0);
+  setToggle('sd', 0);
   var scEl=document.getElementById('scEnd'); if(scEl) scEl.value=17;
   updateSmartChargeUI();
 
@@ -1289,8 +1382,8 @@ function buildPriceTable() {
   for(i=0;i<12;i++){
     var nd=M_DAYS_P[i];
     var data=getActivePrices(i);
-    var dchAvg=priceAvg(data,nd,[19,20,21,22]);
-    var tuAvg=priceAvg(data,nd,[17,18]);
+    var dchAvg=priceAvg(data,nd,getDchHoursArr());
+    var tuAvg=priceAvg(data,nd,getChargeHoursArr());
     var solAvg=solAvgPrice(data,nd,i);
     var isLoaded=!!loadedPrices[i];
     var statusHtml=isLoaded?
@@ -1331,8 +1424,8 @@ function resetAllPrices() {
 function updatePriceRow(mi) {
   var nd=M_DAYS_P[mi];
   var data=getActivePrices(mi);
-  var dchAvg=priceAvg(data,nd,[19,20,21,22]);
-  var tuAvg=priceAvg(data,nd,[17,18]);
+  var dchAvg=priceAvg(data,nd,getDchHoursArr());
+  var tuAvg=priceAvg(data,nd,getChargeHoursArr());
   var solAvg=solAvgPrice(data,nd,mi);
   var isLoaded=!!loadedPrices[mi];
 
@@ -1491,6 +1584,7 @@ function resetAll() {
   document.getElementById('dchStart').value = 19;
   document.getElementById('dchEnd').value   = 22;
   setToggle('sc', 0);
+  setToggle('sd', 0);
   var scEl=document.getElementById('scEnd'); if(scEl) scEl.value=17;
   updateSmartChargeUI();
 
@@ -1589,8 +1683,8 @@ function buildPriceTable() {
   for(i=0;i<12;i++){
     var nd=M_DAYS_P[i];
     var data=getActivePrices(i);
-    var dchAvg=priceAvg(data,nd,[19,20,21,22]);
-    var tuAvg=priceAvg(data,nd,[17,18]);
+    var dchAvg=priceAvg(data,nd,getDchHoursArr());
+    var tuAvg=priceAvg(data,nd,getChargeHoursArr());
     var solAvg=solAvgPrice(data,nd,i);
     var isLoaded=!!loadedPrices[i];
     var statusHtml=isLoaded?
@@ -1631,8 +1725,8 @@ function resetAllPrices() {
 function updatePriceRow(mi) {
   var nd=M_DAYS_P[mi];
   var data=getActivePrices(mi);
-  var dchAvg=priceAvg(data,nd,[19,20,21,22]);
-  var tuAvg=priceAvg(data,nd,[17,18]);
+  var dchAvg=priceAvg(data,nd,getDchHoursArr());
+  var tuAvg=priceAvg(data,nd,getChargeHoursArr());
   var solAvg=solAvgPrice(data,nd,mi);
   var isLoaded=!!loadedPrices[mi];
 
@@ -2050,6 +2144,7 @@ function getClientData() {
     ['corr',     gi('corr')],
     ['scEnd',    gi('scEnd')],
     ['scMode',   toggleState.sc],
+    ['sdMode',   toggleState.sd],
     ['modelName', document.getElementById('modelName').value.trim()]
   ];
   for(var i=0;i<12;i++) data.push(['cons_'+i, gi('cons'+i)]);
@@ -2071,84 +2166,309 @@ function exportClient() {
 
 function exportPDF() {
   if(typeof html2canvas==='undefined'||typeof window.jspdf==='undefined'){
-    alert('PDF-бібліотеки ще завантажуються, зачекайте секунду і спробуйте знову.');
+    alert('Бібліотеки ще завантажуються, зачекайте секунду і спробуйте знову.');
     return;
   }
+  if(!lastMonthly || lastMonthly.length < 12){
+    alert('Спочатку запустіть розрахунок (▶ Розрахувати)');
+    return;
+  }
+
   var jsPDF = window.jspdf.jsPDF;
+  var M = lastMonthly;
   var modelName = (document.getElementById('modelName').value.trim()||'Модель');
   var today = new Date();
-  var dateStr = today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
-  var fileName = (document.getElementById('modelName').value.trim()||'model')+'_звіт_'+dateStr+'.pdf';
+  var dateStr = today.toLocaleDateString('uk-UA');
+  var fileName = (document.getElementById('modelName').value.trim()||'model')
+    + '_звіт_' + today.getFullYear()
+    + '-' + String(today.getMonth()+1).padStart(2,'0')
+    + '-' + String(today.getDate()).padStart(2,'0') + '.pdf';
 
-  // Tabs to capture: id of pane, display label
-  var tabs = [
-    {pane:'pane-params', tab:'tab-params', label:'Параметри'},
-    {pane:'pane-results', tab:'tab-results', label:'Результати'},
-    {pane:'pane-bp',     tab:'tab-bp',      label:'Бізнес-план'},
-    {pane:'pane-chart',  tab:'tab-chart',   label:'Графік'}
+  // ── Parameters ────────────────────────────────────────────────
+  var fx       = gi('fx')||44;
+  var corr     = gi('corr')/100;
+  var capexUSD = gi('capexB') + gi('capexS');
+  var capexUAH = capexUSD * fx;
+  var inst     = gi('inst');
+  var maxPow   = gi('maxPow');
+  var dchStart = gi('dchStart'), dchEnd = gi('dchEnd');
+  var dst      = gi('dst');
+  var scMode   = toggleState.sc, sdMode = toggleState.sd;
+  var scEnd    = gi('scEnd');
+  var tuStart  = gi('tuStart'), tuEnd = gi('tuEnd');
+  var degrad   = []; for(var di=0;di<10;di++) degrad.push(gi('deg'+di));
+
+  var chgLabel = scMode===1 ? '1–'+scEnd+' год (SmartCharge)' : tuStart+'–'+tuEnd+' год';
+  var dchLabel = dchStart+'–'+dchEnd+' год';
+  var modeLabel= (scMode===1?'SmartCharge':'Рівномірний')+' / '+(sdMode===1?'SmartDischarge':'Рівномірний');
+
+  // ── Annual KPIs ───────────────────────────────────────────────
+  var annEve=0,annSol=0,annCost=0,annNet=0;
+  var solGen=0,solSite=0,solLost=0,annDch=0,annGrid=0;
+  for(var ki=0;ki<12;ki++){
+    annEve+=M[ki].totBESS; annSol+=M[ki].totSOL;
+    annCost+=M[ki].totCost; annNet+=M[ki].net;
+    solGen+=M[ki].solGen; solSite+=M[ki].solSite;
+    solLost+=M[ki].solLost; annDch+=M[ki].eveDch; annGrid+=M[ki].grid;
+  }
+  var annRev=annEve+annSol;
+  var lostPct=solGen>0?(solLost/solGen*100).toFixed(1):'0.0';
+
+  // ── 10-year BP ────────────────────────────────────────────────
+  var yEve=[],ySol=[],yCost=[],yCF=[];
+  for(var yi=0;yi<10;yi++){
+    yEve.push(annEve/fx*(1+corr)*degrad[yi]);
+    ySol.push(annSol/fx*(1+corr)*degrad[yi]);
+    yCost.push(-annCost/fx);
+    yCF.push(yEve[yi]+ySol[yi]+yCost[yi]-MAINT);
+  }
+  var cumArr=[],cumVal=-capexUSD;
+  for(var ci=0;ci<10;ci++){cumVal+=yCF[ci]; cumArr.push(cumVal);}
+  var tot10Rev=0,tot10Cost=0;
+  for(var ti=0;ti<10;ti++){tot10Rev+=yEve[ti]+ySol[ti]; tot10Cost+=yCost[ti]-MAINT;}
+  var net10=tot10Rev+tot10Cost;
+  var pb=999, prevCum=-capexUSD;
+  for(var pi2=0;pi2<10;pi2++){
+    if(cumArr[pi2]>=0){pb=pi2+Math.abs(prevCum)/(Math.abs(prevCum)+cumArr[pi2]);break;}
+    prevCum=cumArr[pi2];
+  }
+  var roi=capexUSD>0?net10/capexUSD/10*100:0;
+
+  // ── Helpers ───────────────────────────────────────────────────
+  function fmtN(n){return Math.round(n).toLocaleString('uk-UA');}
+  function fmtS(n){return (n>=0?'+':'')+fmtN(n);}
+  function clr(n){return n>=0?'#1b5e20':'#c62828';}
+
+  // 3x3 watermark grid
+  function watermarkGrid() {
+    var cell='<div style="display:flex;align-items:center;justify-content:center;overflow:hidden">'
+      +'<div style="font-size:36px;font-weight:900;color:#1a2744;opacity:0.055;transform:rotate(32deg);white-space:nowrap;letter-spacing:3px">LIVOLTEKUKRAINE.COM</div>'
+      +'</div>';
+    var nine=cell+cell+cell+cell+cell+cell+cell+cell+cell;
+    return '<div style="position:absolute;top:0;left:0;width:100%;height:100%;display:grid;'
+      +'grid-template-columns:1fr 1fr 1fr;grid-template-rows:1fr 1fr 1fr;'
+      +'pointer-events:none;z-index:0;overflow:hidden">'+nine+'</div>';
+  }
+
+  // Page wrapper
+  function pageWrap(subtitle, content, pageNum) {
+    return '<div style="width:1122px;height:794px;background:#fff;font-family:Arial,Helvetica,sans-serif;position:relative;overflow:hidden;box-sizing:border-box">'
+      +watermarkGrid()
+      +'<div style="background:#1a2744;height:56px;display:flex;align-items:center;padding:0 22px;position:relative;z-index:1;box-sizing:border-box">'
+        +'<div style="background:#2e7d32;padding:8px 16px;border-radius:4px;margin-right:20px;flex-shrink:0;display:flex;align-items:center">'
+          +'<div style="color:#fff;font-size:14px;font-weight:900;letter-spacing:1.5px">LIVOLTEKUKRAINE.COM</div>'
+        +'</div>'
+        +'<div style="flex:1;text-align:center">'
+          +'<div style="color:#fff;font-size:17px;font-weight:700;line-height:1.2">Бизнес модель окупності</div>'
+          +'<div style="color:#90a4ae;font-size:10px;margin-top:2px">'+subtitle+'</div>'
+        +'</div>'
+        +'<div style="color:#90a4ae;font-size:11px;text-align:right;flex-shrink:0">'+pageNum+' / 3<br>'+dateStr+'</div>'
+      +'</div>'
+      +'<div style="background:#c8e6c9;padding:4px 22px;font-style:italic;font-size:10px;color:#333;display:flex;justify-content:space-between;box-sizing:border-box">'
+        +'<span>'+modelName+'</span><span>Дата: '+dateStr+'</span>'
+      +'</div>'
+      +'<div style="padding:14px 22px 46px;position:relative;z-index:1;box-sizing:border-box;height:calc(100% - 110px);overflow:hidden">'
+        +content
+      +'</div>'
+      +'<div style="background:#1a2744;color:#fff;font-size:9px;padding:6px 22px;display:flex;justify-content:space-between;position:absolute;bottom:0;left:0;right:0;box-sizing:border-box">'
+        +'<span>Livoltek Ukraine</span>'
+        +'<span>Конфіденційно — тільки для внутрішнього використання</span>'
+        +'<span>livoltekukraine.com</span>'
+      +'</div>'
+    +'</div>';
+  }
+
+  function kpiCard(label, value, sub, color) {
+    return '<div style="flex:1;margin:0 4px;background:#f8f9fa;border-radius:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08)">'
+      +'<div style="height:6px;background:'+color+'"></div>'
+      +'<div style="padding:8px 12px">'
+        +'<div style="color:#888;font-size:10px;margin-bottom:5px;line-height:1.3">'+label+'</div>'
+        +'<div style="font-size:14px;font-weight:700;color:'+color+'">'+value+'</div>'
+        +'<div style="color:#aaa;font-size:8.5px;margin-top:4px">'+sub+'</div>'
+      +'</div>'
+    +'</div>';
+  }
+  function statCard(label, value, sub) {
+    return '<div style="flex:1;margin:0 3px;background:#f0f4f8;border-radius:5px;padding:6px 9px">'
+      +'<div style="color:#666;font-size:8.5px;margin-bottom:3px">'+label+'</div>'
+      +'<div style="font-size:11.5px;font-weight:700;color:#1a2744">'+value+'</div>'
+      +'<div style="color:#aaa;font-size:7.5px;margin-top:2px">'+sub+'</div>'
+    +'</div>';
+  }
+
+  // ── Page 1 content ────────────────────────────────────────────
+  var p1kpi='<div style="display:flex;margin-bottom:10px">'
+    +kpiCard('Річний дохід BESS+СЕС', fmtN(annRev)+' грн', 'До вирахування витрат', '#1a2744')
+    +kpiCard('Чистий прибуток (рік 1)', fmtS(annNet)+' грн', 'Доходи мінус всі витрати', clr(annNet))
+    +kpiCard('Термін окупності', pb<10?pb.toFixed(1)+' р.':'>10 р.', 'Простий (без дисконту)', '#1a2744')
+    +kpiCard('ROI середньорічний', roi.toFixed(1)+'%', 'Середньорічна рентабельність', clr(roi))
+    +'</div>';
+
+  var p1stats='<div style="display:flex;margin-bottom:11px">'
+    +statCard('Річна генерація СЕС', fmtN(solGen)+' кВт·год', 'кВт·год/рік')
+    +statCard('СЕС → споживачу', fmtN(solSite)+' кВт·год', 'кВт·год/рік')
+    +statCard('Втрачено СЕС', fmtN(solLost)+' кВт·год', lostPct+'% від генерації')
+    +statCard('Розряд BESS', fmtN(annDch)+' кВт·год', 'кВт·год/рік')
+    +statCard('Заряд від мережі', fmtN(annGrid)+' кВт·год', 'кВт·год/рік')
+    +statCard('Дохід BESS+СЕС', '$'+fmtN(annRev/fx), 'USD/рік')
+    +statCard('Витрати заряд', '$'+fmtN(annCost/fx), 'USD/рік')
+    +statCard('Чистий прибуток', (annNet>=0?'+':'')+'$'+fmtN(annNet/fx), 'USD/рік (до обсл.)')
+    +'</div>';
+
+  var paramData=[
+    ['Ємність BESS', inst+' кВтг'],
+    ['Потужність BESS', maxPow+' кВт'],
+    ['Розряд / Заряд', dchLabel+' / '+chgLabel],
+    ['Тариф Р&П', dst+' грн/кВтг'],
+    ['Режим', modeLabel],
+    ['Курс USD/UAH', fx+' грн/$'],
+    ['CAPEX BESS', '$'+fmtN(gi('capexB'))],
+    ['CAPEX СЕС', '$'+fmtN(gi('capexS'))],
+    ['Загальний CAPEX', '$'+fmtN(capexUSD)]
   ];
+  var pGrid='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:9px">';
+  paramData.forEach(function(p3){
+    pGrid+='<div style="background:#f8f9fa;border-radius:4px;padding:5px 9px;font-size:9.5px">'
+      +'<span style="color:#888">'+p3[0]+': </span>'
+      +'<span style="font-weight:700;color:#333">'+p3[1]+'</span>'
+      +'</div>';
+  });
+  pGrid+='</div>';
 
-  // Remember which tab was active
-  var activePane = null;
-  document.querySelectorAll('.pane').forEach(function(el){ if(el.style.display!=='none') activePane=el.id; });
+  var summBar='<div style="background:#1a2744;border-radius:5px;padding:7px 18px;display:flex;justify-content:space-around">'
+    +'<span style="color:#fff;font-size:11px;font-weight:700">Дохід: '+fmtN(annRev)+' грн</span>'
+    +'<span style="color:#fff;font-size:11px;font-weight:700">Витрати: '+fmtN(annCost)+' грн</span>'
+    +'<span style="color:'+(annNet>=0?'#a5d6a7':'#ef9a9a')+';font-size:11px;font-weight:700">Чистий: '+fmtS(annNet)+' грн</span>'
+    +'</div>';
 
+  var p1content=
+    '<div style="font-size:12px;font-weight:700;color:#1a2744;margin-bottom:7px">Ключові фінансові показники</div>'
+    +p1kpi
+    +'<div style="font-size:11px;font-weight:700;color:#455a6a;margin-bottom:5px">Операційна статистика (рік 1)</div>'
+    +p1stats
+    +'<div style="font-size:12px;font-weight:700;color:#1a2744;margin-bottom:6px">Параметри проекту та CAPEX</div>'
+    +pGrid+summBar;
+
+  // ── Page 2 content ────────────────────────────────────────────
+  var mTotGrid2=0,mTotDch2=0,mTotBESS2=0,mTotSOL2=0,mTotCost2=0,mTotNet2=0;
+  var mRows='';
+  MUAS.forEach(function(mn,i){
+    var r=M[i];
+    mTotGrid2+=r.grid; mTotDch2+=r.eveDch;
+    mTotBESS2+=r.totBESS; mTotSOL2+=r.totSOL;
+    mTotCost2+=r.totCost; mTotNet2+=r.net;
+    mRows+='<tr style="background:'+(i%2===0?'#fff':'#f5f5f5')+'">'
+      +'<td style="padding:5px 9px;font-weight:700;font-size:11px">'+mn+'</td>'
+      +'<td style="padding:5px 9px;text-align:right;font-size:11px">'+fmtN(r.grid)+'</td>'
+      +'<td style="padding:5px 9px;text-align:right;font-size:11px">'+fmtN(r.eveDch)+'</td>'
+      +'<td style="padding:5px 9px;text-align:right;font-size:11px">'+fmtN(r.totBESS)+'</td>'
+      +'<td style="padding:5px 9px;text-align:right;font-size:11px">'+fmtN(r.totSOL)+'</td>'
+      +'<td style="padding:5px 9px;text-align:right;font-size:11px">'+fmtN(r.totCost)+'</td>'
+      +'<td style="padding:5px 9px;text-align:right;font-size:11px;font-weight:700;color:'+clr(r.net)+'">'+fmtS(r.net)+'</td>'
+      +'</tr>';
+  });
+  mRows+='<tr style="background:#1a2744">'
+    +'<td style="padding:6px 9px;color:#fff;font-weight:700;font-size:11px">РАЗОМ</td>'
+    +'<td style="padding:6px 9px;text-align:right;color:#fff;font-weight:700;font-size:11px">'+fmtN(mTotGrid2)+'</td>'
+    +'<td style="padding:6px 9px;text-align:right;color:#fff;font-weight:700;font-size:11px">'+fmtN(mTotDch2)+'</td>'
+    +'<td style="padding:6px 9px;text-align:right;color:#fff;font-weight:700;font-size:11px">'+fmtN(mTotBESS2)+'</td>'
+    +'<td style="padding:6px 9px;text-align:right;color:#fff;font-weight:700;font-size:11px">'+fmtN(mTotSOL2)+'</td>'
+    +'<td style="padding:6px 9px;text-align:right;color:#fff;font-weight:700;font-size:11px">'+fmtN(mTotCost2)+'</td>'
+    +'<td style="padding:6px 9px;text-align:right;font-weight:700;font-size:11px;color:'+(mTotNet2>=0?'#a5d6a7':'#ef9a9a')+'">'+fmtS(mTotNet2)+'</td>'
+    +'</tr>';
+
+  var thS='padding:6px 9px;font-size:11px;font-weight:700;white-space:nowrap';
+  var p2content='<div style="font-size:14px;font-weight:700;color:#1a2744;margin-bottom:10px">Місячні результати — рік 1</div>'
+    +'<table style="width:100%;border-collapse:collapse;border:1px solid #ddd">'
+    +'<tr style="background:#1a2744;color:#fff">'
+    +'<th style="'+thS+';text-align:left">Місяць</th>'
+    +'<th style="'+thS+';text-align:right">Заряд кВтг</th>'
+    +'<th style="'+thS+';text-align:right">Розряд кВтг</th>'
+    +'<th style="'+thS+';text-align:right">Дохід BESS грн</th>'
+    +'<th style="'+thS+';text-align:right">Дохід СЕС грн</th>'
+    +'<th style="'+thS+';text-align:right">Витрати грн</th>'
+    +'<th style="'+thS+';text-align:right">Чистий грн</th>'
+    +'</tr><tbody>'+mRows+'</tbody></table>';
+
+  // ════════════════════════════════════════════════════════════
+  // Capture pipeline
+  // ════════════════════════════════════════════════════════════
   var doc = new jsPDF({orientation:'landscape', unit:'mm', format:'a4'});
-  var pageW = doc.internal.pageSize.getWidth();
-  var pageH = doc.internal.pageSize.getHeight();
-  var headerH = 10; // mm for model name header strip
+  var PW = doc.internal.pageSize.getWidth();
+  var PH = doc.internal.pageSize.getHeight();
+
+  var stage = document.createElement('div');
+  stage.style.cssText='position:fixed;top:0;left:-1200px;width:1122px;height:794px;overflow:hidden;z-index:-999;pointer-events:none';
+  document.body.appendChild(stage);
 
   var btn = document.getElementById('calcBtn');
   if(btn) btn.textContent='⏳ PDF...';
+  var activePane=null;
+  document.querySelectorAll('.pane').forEach(function(el){ if(el.style.display!=='none') activePane=el.id; });
 
-  function captureTab(idx) {
-    if(idx >= tabs.length) {
-      // Restore original active tab
-      if(activePane) showTab(activePane.replace('pane-',''));
-      if(btn) btn.textContent='▶ Розрахувати';
-      doc.save(fileName);
-      return;
-    }
-    var t = tabs[idx];
-    // Switch to this tab
-    showTab(t.pane.replace('pane-',''));
-
-    // Wait for render (charts need a frame)
+  function captureStage(cb) {
     setTimeout(function(){
-      var paneEl = document.getElementById(t.pane);
-      html2canvas(paneEl, {
-        scale:1.5,
-        useCORS:true,
-        backgroundColor:'#f0f2f5',
-        scrollY:0,
-        windowWidth: paneEl.scrollWidth,
-        height: paneEl.scrollHeight
-      }).then(function(canvas){
-        if(idx>0) doc.addPage();
-
-        // Header strip
-        doc.setFillColor(44,62,80);
-        doc.rect(0, 0, pageW, headerH, 'F');
-        doc.setFontSize(8);
-        doc.setTextColor(255,255,255);
-        doc.text(modelName+' — '+t.label, 6, 6.5);
-        doc.text(dateStr, pageW-6, 6.5, {align:'right'});
-
-        // Page content
-        var imgW = pageW;
-        var imgH = (canvas.height / canvas.width) * imgW;
-        var availH = pageH - headerH;
-        // Scale down if image is taller than page
-        if(imgH > availH){ imgW = availH * (canvas.width/canvas.height); imgH = availH; }
-        var xOff = (pageW - imgW) / 2;
-
-        doc.addImage(canvas.toDataURL('image/jpeg',0.92), 'JPEG', xOff, headerH, imgW, imgH);
-        captureTab(idx+1);
-      });
-    }, 350);
+      html2canvas(stage.firstChild,{scale:1.5,useCORS:true,backgroundColor:'#ffffff',width:1122,height:794,scrollX:0,scrollY:0})
+        .then(function(canvas){ cb(canvas.toDataURL('image/jpeg',0.93)); });
+    }, 150);
   }
 
-  captureTab(0);
+  function finish() {
+    document.body.removeChild(stage);
+    if(activePane) showTab(activePane.replace('pane-',''));
+    if(btn) btn.textContent='▶ Розрахувати';
+    doc.save(fileName);
+  }
+
+  // Page 1 – KPI
+  stage.innerHTML = pageWrap('Виконавче резюме — KPI', p1content, 1);
+  captureStage(function(img1){
+    doc.addImage(img1,'JPEG',0,0,PW,PH);
+
+    // Page 2 – Business plan tab screenshot
+      showTab('bp');
+      setTimeout(function(){
+        var bpEl = document.getElementById('pane-bp');
+        html2canvas(bpEl,{scale:1.5,useCORS:true,backgroundColor:'#f0f2f5',
+          scrollY:0,windowWidth:bpEl.scrollWidth,height:bpEl.scrollHeight})
+          .then(function(bpCanvas){
+            doc.addPage();
+            var iW=PW, iH=(bpCanvas.height/bpCanvas.width)*PW;
+            var avail=PH;
+            if(iH>avail){iW=avail*(bpCanvas.width/bpCanvas.height); iH=avail;}
+            doc.addImage(bpCanvas.toDataURL('image/jpeg',0.92),'JPEG',(PW-iW)/2,0,iW,iH);
+
+            // Page 3 – Charts 2×2
+            showTab('chart');
+            setTimeout(function(){
+              var chartIds=['mainChart','finChart','bessChart','bessChargeChart'];
+              var chartTitles=['Місячний дохід','Фінансові результати','Розряд BESS','Заряд BESS'];
+              var chartImgs=chartIds.map(function(id){
+                var cvs=document.getElementById(id);
+                if(!cvs) return '';
+                try{ return cvs.toDataURL('image/png'); }catch(e){ return ''; }
+              });
+              var gridHTML='<div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:8px;height:100%">';
+              chartImgs.forEach(function(src,i){
+                gridHTML+='<div style="background:#f8f9fa;border-radius:5px;overflow:hidden;display:flex;flex-direction:column">'
+                  +'<div style="background:#1a2744;color:#fff;font-size:10px;font-weight:700;padding:4px 10px">'+chartTitles[i]+'</div>'
+                  +(src?'<img src="'+src+'" style="flex:1;object-fit:contain;width:100%;min-height:0">'
+                        :'<div style="flex:1;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:11px">Графік недоступний</div>')
+                  +'</div>';
+              });
+              gridHTML+='</div>';
+              stage.innerHTML=pageWrap('Графіки', gridHTML, 3);
+              captureStage(function(img4){
+                doc.addPage();
+                doc.addImage(img4,'JPEG',0,0,PW,PH);
+                finish();
+              });
+            }, 1800);
+          });
+      }, 600);
+  });
 }
+
 
 function importClient(event) {
   var file=event.target.files[0];
@@ -2171,6 +2491,7 @@ function importClient(event) {
       if(map['dstMode']!==undefined)   setToggle('dm', parseInt(map['dstMode'])||0);
       if(map['priceMode']!==undefined) setToggle('pm', parseInt(map['priceMode'])||0);
       if(map['scMode']!==undefined) setToggle('sc', parseInt(map['scMode'])||0);
+      if(map['sdMode']!==undefined) setToggle('sd', parseInt(map['sdMode'])||0);
       updateSmartChargeUI();
       for(var i=0;i<12;i++){
         if(map['cons_'+i]!==undefined){var ce=document.getElementById('cons'+i);if(ce)ce.value=map['cons_'+i];}
