@@ -539,6 +539,7 @@ function simMonth(mi, p) {
 
   var d,h,pr,bess,sh,cHr,toSite,surplus,tb,tbSol,tbGrd,space,ePH;
   var sdPerHrDay,hh2,dOpts,di,bessLeft,shD,cHrD,unmetD,assign,dchLimit;
+  var carryOver=0; // SOC carried over from end of previous day
   for (d=0; d<nd; d++) {
     pr = prMonth[String(d)] || [];
     sdPerHrDay={};
@@ -556,7 +557,7 @@ function simMonth(mi, p) {
       for(ci=0;ci<Math.min(nChHours,chargeOpts.length);ci++) cheapSet[chargeOpts[ci][0]]=true;
 
       // Step 2: pre-calc BESS level at discharge start (charges before dchStart only)
-      var bessPreSC=0;
+      var bessPreSC=carryOver;
       for(hh=1;hh<p.dchStart;hh++){
         if(cheapSet[hh]) bessPreSC+=Math.min(p.maxPow,Math.max(0,usable-bessPreSC));
       }
@@ -581,7 +582,7 @@ function simMonth(mi, p) {
       }
 
       // Step 3: simulate hour by hour
-      bess=0;
+      bess=carryOver;
       for(h=1;h<=24;h++){
         sh=(wt[h]||0)*spd;
         cHr=(h>=p.wStart&&h<=p.wEnd)?consHr:0;
@@ -617,7 +618,7 @@ function simMonth(mi, p) {
 
     } else {
       // ── Standard mode (original logic) ────────────────────────────────────
-      var bessBefore=0, shh, cHrH, toSiteH, surplusH, tbH, tbSolH, tbGrdH;
+      var bessBefore=carryOver, shh, cHrH, toSiteH, surplusH, tbH, tbSolH, tbGrdH;
       for(hh=1;hh<=24;hh++){
         shh=(wt[hh]||0)*spd; cHrH=(hh>=p.wStart&&hh<=p.wEnd)?consHr:0;
         toSiteH=Math.min(shh,cHrH); surplusH=shh-toSiteH;
@@ -648,7 +649,7 @@ function simMonth(mi, p) {
         }
       }
 
-      bess=0;
+      bess=carryOver;
       for(h=1;h<=24;h++){
         sh=(wt[h]||0)*spd;
         cHr=(h>=p.wStart&&h<=p.wEnd)?consHr:0;
@@ -691,6 +692,7 @@ function simMonth(mi, p) {
         R.solRev+=toSite*pkSol;
       }
     }
+    carryOver=bess; // pass residual SOC to next day
   }
 
   // Apply VAT and DST
