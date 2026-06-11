@@ -34,6 +34,7 @@ body{font-family:Calibri,Arial,sans-serif;font-size:13px;background:#f0f2f5;colo
 .tgrow{display:flex;background:#eee;border-radius:20px;padding:2px;gap:2px}
 .tgbtn{padding:5px 11px;border-radius:16px;cursor:pointer;font-size:12px;font-weight:600;color:#666;border:none;background:none}
 .tgbtn.on{background:#5D6D7E;color:#fff}
+.tgbtn.disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
 .trow{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #eee;flex-wrap:wrap}
 .trow .lbl{flex:1;min-width:180px}
 .mtbl{width:100%;border-collapse:collapse;font-size:12px}
@@ -139,7 +140,7 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
   <div class="row"><span class="lbl">Встановлена ємність</span><input class="inp" id="inst" value="1044" oninput="updateCalc()"><span class="unit">кВт·год</span></div>
   <div class="row"><span class="lbl">Корисна ємність (×90%)</span><div class="calc" id="usable">939.6</div><span class="unit">кВт·год</span></div>
   <div class="row"><span class="lbl">Макс. потужність заряду від мережі</span><input class="inp" id="maxPow" value="250"><span class="unit">кВт</span></div>
-  <div class="note" style="margin:8px 0 4px">⚠ Три вікна нижче не повинні перекриватись. Розряд — в межах робочого часу.</div>
+  <div class="note" style="margin:8px 0 4px">⚠ Три вікна нижче не повинні перекриватись. Розряд самоспоживання — в межах робочого часу. В режимі Активного споживача окреме вікно продажу для продажу в мережу.</div>
   <div class="row" id="solEndRow"><span class="lbl">Кінець сонячного вікна</span><input class="inp" id="solEnd" value="16" oninput="updateCalc()"><span class="unit">год</span></div>
   <div class="row" id="tuStartRow"><span class="lbl">Початок топ-ап вікна</span><input class="inp" id="tuStart" value="17" oninput="updateCalc()"><span class="unit">год</span></div>
   <div class="row" id="tuEndRow"><span class="lbl">Кінець топ-ап вікна</span><input class="inp" id="tuEnd" value="18" oninput="updateCalc()"><span class="unit">год</span></div>
@@ -161,6 +162,15 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
       <button class="tgbtn" data-tg="sd" data-val="1" onclick="setToggle('sd',1)">⚡ SmartDischarge</button>
     </div>
   </div>
+  <div class="trow" style="margin-top:6px">
+    <span class="lbl">Активний споживач</span>
+    <div class="tgrow">
+      <button class="tgbtn on" data-tg="ac" data-val="0" onclick="setToggle('ac',0);updateActiveConsumerUI()">Вимк.</button>
+      <button class="tgbtn" data-tg="ac" data-val="1" onclick="setToggle('ac',1);updateActiveConsumerUI()">🔋 Активний споживач</button>
+    </div>
+  </div>
+  <div class="row" id="acSaleStartRow" style="display:none"><span class="lbl">Початок вікна продажу</span><input class="inp" id="acSaleStart" value="22" oninput="updateCalc()"><span class="unit">год</span></div>
+  <div class="row" id="acSaleEndRow" style="display:none"><span class="lbl">Кінець вікна продажу</span><input class="inp" id="acSaleEnd" value="6" oninput="updateCalc()"><span class="unit">год</span></div>
 </div></div>
 
 <div class="card">
@@ -351,7 +361,7 @@ function showTab(name) {
 }
 
 // Toggle buttons
-var toggleState = {pm:0, vm:0, dm:0, sc:0, sd:0, xs:0};
+var toggleState = {pm:0, vm:0, dm:0, sc:0, sd:0, xs:0, ac:0};
 function setToggle(key, val) {
   toggleState[key] = val;
   var btns = document.querySelectorAll('[data-tg="'+key+'"]');
@@ -383,6 +393,28 @@ function updateExistingSolarUI() {
   updateCalc();
 }
 
+function updateActiveConsumerUI() {
+  var ac = toggleState.ac === 1;
+  document.getElementById('acSaleStartRow').style.display = ac ? '' : 'none';
+  document.getElementById('acSaleEndRow').style.display   = ac ? '' : 'none';
+  // Grey out discharge window fields (not used in AC mode)
+  ['dchStart','dchEnd'].forEach(function(id){
+    var row = document.getElementById(id) ? document.getElementById(id).closest('.row') : null;
+    if (!row) return;
+    row.style.opacity = ac ? '0.35' : '1';
+    var inp = document.getElementById(id);
+    if (inp) { inp.disabled = ac; inp.style.cursor = ac ? 'not-allowed' : ''; }
+  });
+  var fixBtn = document.querySelector('[data-tg="pm"][data-val="1"]');
+  if (ac) {
+    setToggle('pm', 0);
+    if (fixBtn) fixBtn.classList.add('disabled');
+  } else {
+    if (fixBtn) fixBtn.classList.remove('disabled');
+  }
+  validateInputs();
+}
+
 function updateSmartChargeUI() {
   var sc = toggleState.sc === 1;
   var scRow = document.getElementById('scEndRow');
@@ -405,8 +437,8 @@ function validateInputs() {
   var tuStart=gi('tuStart'), tuEnd=gi('tuEnd'), solEnd=gi('solEnd');
   var msgs=[], ids=[];
 
-  // Always check: discharge window vs working hours
-  if (dchEnd > 0 && wEnd > 0 && dchEnd > wEnd) {
+  // Check discharge window vs working hours (skip in AC mode — discharge window is unused)
+  if (!toggleState.ac && dchEnd > 0 && wEnd > 0 && dchEnd > wEnd) {
     ids.push('dchEnd','wEnd');
     msgs.push('Кінець розряду ('+dchEnd+') перевищує кінець робочого дня ('+wEnd+') — год. '+((wEnd+1))+'–'+dchEnd+' не дадуть розряду');
   }
@@ -527,15 +559,20 @@ function simMonth(mi, p) {
   var consHr = nd>0 && (p.wEnd-p.wStart+1)>0 ? cons/nd/(p.wEnd-p.wStart+1) : 0;
   var wt=solarWeights(KYIV_SUN[mi]), spd=sol/nd;
   var dchN=p.dchEnd-p.dchStart+1;
+  // In AC mode: discharge for self-consumption covers all working hours
+  var effDchStart = p.acMode ? p.wStart   : p.dchStart;
+  var effDchEnd   = p.acMode ? p.wEnd     : p.dchEnd;
+  var effDchN     = p.acMode ? Math.max(1, p.wEnd-p.wStart+1) : Math.max(1,dchN);
   var prMonth=getActivePrices(mi);
   var pmode=toggleState.pm, fp=p.fixPrice;
   var sc=toggleState.sc===1;
   var sd=p.sdMode===1;
-  var scEnd=p.scEnd>0?p.scEnd:(p.dchStart-1);
+  var scEnd=p.scEnd>0?p.scEnd:(effDchStart-1);
   var nChHours=sc&&hasB?Math.max(1,Math.ceil(usable/Math.max(p.maxPow,1))):0;
 
   var R={solGen:0,solSite:0,solBess:0,solLost:0,
-         grid:0,gridCost:0,eveDch:0,eveRev:0,solRev:0};
+         grid:0,gridCost:0,eveDch:0,eveRev:0,solRev:0,
+         acSaleKwh:0,acSaleRev:0};
 
   var d,h,pr,bess,sh,cHr,toSite,surplus,tb,tbSol,tbGrd,space,ePH;
   var sdPerHrDay,hh2,dOpts,di,bessLeft,shD,cHrD,unmetD,assign,dchLimit;
@@ -549,24 +586,25 @@ function simMonth(mi, p) {
       // Step 1: find N cheapest hours in charge window [1..scEnd], skip discharge hours
       var chargeOpts=[], hh, ci;
       for(hh=1;hh<=scEnd;hh++){
-        if(hh>=p.dchStart&&hh<=p.dchEnd) continue;
+        if(hh>=effDchStart&&hh<=effDchEnd) continue;
         chargeOpts.push([hh,(pr[hh-1]||0)]);
       }
       chargeOpts.sort(function(a,b){return a[1]-b[1];});
       var cheapSet={};
       for(ci=0;ci<Math.min(nChHours,chargeOpts.length);ci++) cheapSet[chargeOpts[ci][0]]=true;
 
-      // Step 2: pre-calc BESS level at discharge start (charges before dchStart only)
+      // Step 2: pre-calc BESS level at discharge start (charges before effDchStart only)
       var bessPreSC=carryOver;
-      for(hh=1;hh<p.dchStart;hh++){
+      for(hh=1;hh<effDchStart;hh++){
         if(cheapSet[hh]) bessPreSC+=Math.min(p.maxPow,Math.max(0,usable-bessPreSC));
       }
-      var dchPerHrSC=dchN>0?Math.min(bessPreSC/dchN,consHr):0;
+      // AC mode: discharge up to maxPow per hour (no equalization cap); else equal share
+      var dchPerHrSC=p.acMode?p.maxPow:(effDchN>0?Math.min(bessPreSC/effDchN,consHr):0);
 
       // SmartDischarge: rank discharge hours by DAM price for this day
       if(sd && hasB && bessPreSC>0){
         dOpts=[];
-        for(hh2=p.dchStart;hh2<=p.dchEnd;hh2++){
+        for(hh2=effDchStart;hh2<=effDchEnd;hh2++){
           shD=(wt[hh2]||0)*spd;
           cHrD=(hh2>=p.wStart&&hh2<=p.wEnd)?consHr:0;
           unmetD=Math.max(0,cHrD-shD);
@@ -588,16 +626,18 @@ function simMonth(mi, p) {
         cHr=(h>=p.wStart&&h<=p.wEnd)?consHr:0;
         toSite=Math.min(sh,cHr);
         surplus=sh-toSite;
-        var inDchSC=(h>=p.dchStart&&h<=p.dchEnd);
+        var inDchSC=(h>=effDchStart&&h<=effDchEnd);
+        var dchThisHourSC=0;
 
         if(inDchSC){
-          // Discharge: SmartDischarge (price-ranked) or equal
+          // Discharge: SmartDischarge (price-ranked) or equal; in AC mode uncapped by consHr
           dchLimit=sd?(sdPerHrDay[h]||0):dchPerHrSC;
           ePH=Math.min(dchLimit,Math.max(0,cHr-toSite),bess);
           bess-=ePH;
+          dchThisHourSC=ePH;
           R.eveDch+=ePH;
           R.eveRev+=ePH*(pr[h-1]||0)/1000; // always DAM price for BESS discharge
-          R.solLost+=surplus;
+          R.solLost+=surplus; // SC mode: solar surplus outside charge slots is lost
         } else if(cheapSet[h]){
           // Smart charge: buy from grid at this cheap DAM hour
           tbGrd=Math.min(p.maxPow,Math.max(0,usable-bess));
@@ -607,6 +647,17 @@ function simMonth(mi, p) {
           R.solLost+=surplus; // solar surplus not used by BESS in SmartCharge mode
         } else {
           R.solLost+=surplus; // all solar surplus lost outside charge/discharge windows
+        }
+
+        // Active Consumer: sell residual BESS to grid within sale window
+        if(p.acMode && hasB && bess>0){
+          var inSaleSC=p.acSaleStart<=p.acSaleEnd?(h>=p.acSaleStart&&h<=p.acSaleEnd):(h>=p.acSaleStart||h<=p.acSaleEnd);
+          if(inSaleSC){
+            // Before working hours: reserve enough BESS to cover today's self-consumption
+            var reserveSC=(h<p.wStart)?Math.max(0,consHr*(p.wEnd-p.wStart+1)):0;
+            var canSellSC=Math.min(Math.max(0,p.maxPow-dchThisHourSC),Math.max(0,bess-reserveSC));
+            if(canSellSC>0){bess-=canSellSC;R.acSaleKwh+=canSellSC;R.acSaleRev+=canSellSC*(pr[h-1]||0)/1000;}
+          }
         }
 
         R.solGen+=sh;
@@ -622,19 +673,20 @@ function simMonth(mi, p) {
       for(hh=1;hh<=24;hh++){
         shh=(wt[hh]||0)*spd; cHrH=(hh>=p.wStart&&hh<=p.wEnd)?consHr:0;
         toSiteH=Math.min(shh,cHrH); surplusH=shh-toSiteH;
-        var inDchH=(hh>=p.dchStart&&hh<=p.dchEnd);
-        var inTuH=(hh>=p.tuStart&&hh<=p.tuEnd);
+        var inDchH=(hh>=effDchStart&&hh<=effDchEnd);
+        var inTuH=(hh>=p.tuStart&&hh<=p.tuEnd)&&hh<effDchStart;
         var inSolH=(hh<=p.solEnd&&!inDchH&&!inTuH);
         if(inSolH){tbH=hasB?Math.min(surplusH,usable-bessBefore):0;bessBefore+=tbH;}
         else if(inTuH){tbSolH=hasB?Math.min(surplusH,p.maxPow,usable-bessBefore):0;tbGrdH=hasB?Math.min(p.maxPow-tbSolH,Math.max(0,usable-bessBefore-tbSolH)):0;bessBefore+=tbSolH+tbGrdH;}
-        if(hh===p.dchStart-1) break;
+        if(hh===effDchStart-1) break;
       }
-      var dchPerHr=hasB&&dchN>0?Math.min(bessBefore/dchN,consHr):0;
+      // AC mode: discharge up to maxPow per unmet hour (no equalization); else equal share
+      var dchPerHr=p.acMode?p.maxPow:(hasB&&effDchN>0?Math.min(bessBefore/effDchN,consHr):0);
 
       // SmartDischarge: rank discharge hours by DAM price for this day
       if(sd && hasB && bessBefore>0){
         dOpts=[];
-        for(hh2=p.dchStart;hh2<=p.dchEnd;hh2++){
+        for(hh2=effDchStart;hh2<=effDchEnd;hh2++){
           shD=(wt[hh2]||0)*spd;
           cHrD=(hh2>=p.wStart&&hh2<=p.wEnd)?consHr:0;
           unmetD=Math.max(0,cHrD-shD);
@@ -655,18 +707,39 @@ function simMonth(mi, p) {
         cHr=(h>=p.wStart&&h<=p.wEnd)?consHr:0;
         toSite=Math.min(sh,cHr);
         surplus=sh-toSite;
-        var inDch=(h>=p.dchStart&&h<=p.dchEnd);
+        var inDch=(h>=effDchStart&&h<=effDchEnd);
         var inTu=(h>=p.tuStart&&h<=p.tuEnd);
         var inSol=(h<=p.solEnd&&!inDch&&!inTu);
 
-        if(inDch){
-          dchLimit=sd?(sdPerHrDay[h]||0):dchPerHr;
-          ePH=hasB?Math.min(dchLimit,Math.max(0,cHr-toSite),bess):0;
-          bess-=ePH;
-          R.eveDch+=ePH;
-          var pkDch=pmode===0?(pr[h-1]||0)/1000:fp;
-          R.eveRev+=ePH*pkDch;
-          R.solLost+=surplus;
+        var dchThisHourStd=0;
+        if(inTu && p.acMode){
+          // AC mode: top-up takes priority over discharge — charge BESS from grid (+solar surplus)
+          tbSol=hasB?Math.min(surplus,p.maxPow,usable-bess):0;
+          space=Math.max(0,usable-bess-tbSol);
+          tbGrd=hasB?Math.min(p.maxPow-tbSol,space):0;
+          bess+=tbSol+tbGrd;
+          R.solBess+=tbSol;
+          R.grid+=tbGrd;
+          var pkTuAC=pmode===0?(pr[h-1]||0)/1000:fp;
+          R.gridCost+=tbGrd*pkTuAC;
+          R.solLost+=Math.max(0,surplus-tbSol);
+        } else if(inDch){
+          if(p.acMode && surplus>0){
+            // AC + Standard: solar surplus in working hours charges BESS (solar > consumption)
+            tb=hasB?Math.min(surplus,p.maxPow,usable-bess):0;
+            bess+=tb;
+            R.solBess+=tb;
+            R.solLost+=surplus-tb;
+          } else {
+            dchLimit=sd?(sdPerHrDay[h]||0):dchPerHr;
+            ePH=hasB?Math.min(dchLimit,Math.max(0,cHr-toSite),bess):0;
+            bess-=ePH;
+            dchThisHourStd=ePH;
+            R.eveDch+=ePH;
+            var pkDch=pmode===0?(pr[h-1]||0)/1000:fp;
+            R.eveRev+=ePH*pkDch;
+            R.solLost+=surplus;
+          }
         } else if(inTu){
           tbSol=hasB?Math.min(surplus,p.maxPow,usable-bess):0;
           space=Math.max(0,usable-bess-tbSol);
@@ -684,6 +757,17 @@ function simMonth(mi, p) {
           R.solLost+=surplus-tb;
         } else {
           R.solLost+=surplus;
+        }
+
+        // Active Consumer: sell residual BESS to grid within sale window
+        if(p.acMode && hasB && bess>0){
+          var inSaleStd=p.acSaleStart<=p.acSaleEnd?(h>=p.acSaleStart&&h<=p.acSaleEnd):(h>=p.acSaleStart||h<=p.acSaleEnd);
+          if(inSaleStd){
+            // Before working hours: reserve enough BESS to cover today's self-consumption
+            var reserveStd=(h<p.wStart)?Math.max(0,consHr*(p.wEnd-p.wStart+1)):0;
+            var canSellStd=Math.min(Math.max(0,p.maxPow-dchThisHourStd),Math.max(0,bess-reserveStd));
+            if(canSellStd>0){bess-=canSellStd;R.acSaleKwh+=canSellStd;R.acSaleRev+=canSellStd*(pr[h-1]||0)/1000;}
+          }
         }
 
         R.solGen+=sh;
@@ -709,7 +793,8 @@ function simMonth(mi, p) {
   R.totSOL=R.solRev*(1+vatR)+R.solSite*dstR;
   // Existing solar mode: exclude solar revenue from financials (graphs still use raw physical data)
   if(toggleState.xs===1) R.totSOL=0;
-  R.net=R.totBESS+R.totSOL-R.totCost;
+  R.totAC=R.acSaleRev*(1+vatR)+R.acSaleKwh*dstR;
+  R.net=R.totBESS+R.totSOL+R.totAC-R.totCost;
   return R;
 }
 
@@ -734,7 +819,10 @@ function runModel() {
     fx:       gi('fx'),
     corrPct:  gi('corr')/100,
     scEnd:    gi('scEnd'),
-    sdMode:   toggleState.sd,
+    sdMode:      toggleState.sd,
+    acMode:      toggleState.ac,
+    acSaleStart: gi('acSaleStart')||22,
+    acSaleEnd:   gi('acSaleEnd')||6,
     cons:     [], solar: [], degrad: []
   };
   var i;
@@ -758,21 +846,26 @@ function runModel() {
 }
 
 function renderKPI(M,p) {
-  var solGen=0,solSite=0,solLost=0,eveDch=0,grid=0,totRev=0,totCost=0,net=0;
+  var solGen=0,solSite=0,solLost=0,eveDch=0,grid=0,totRev=0,totCost=0,net=0,acSaleKwh=0,totAC=0;
   var i;
   for(i=0;i<12;i++){
     solGen+=M[i].solGen; solSite+=M[i].solSite; solLost+=M[i].solLost;
     eveDch+=M[i].eveDch; grid+=M[i].grid;
     totRev+=M[i].totBESS+M[i].totSOL; totCost+=M[i].totCost; net+=M[i].net;
+    acSaleKwh+=M[i].acSaleKwh; totAC+=M[i].totAC;
   }
   var fx=gi('fx');
   var lp = solGen>0 ? (solLost/solGen*100).toFixed(1) : '0.0';
+  var acKpi = toggleState.ac===1 ?
+    kpi('Продаж в мережу (АС)',f0(acSaleKwh),'кВт·год/рік','o')+
+    kpi('Дохід від продажу',f0(totAC/fx),'USD/рік','g') : '';
   document.getElementById('kpiArea').innerHTML=
     kpi('Річна генерація СЕС',f0(solGen),'кВт·год/рік','s')+
     kpi('СЕС → споживачу',f0(solSite),'кВт·год/рік','g')+
     kpi('⚠ Втрачено',f0(solLost),lp+'% від генерації','r')+
     kpi('Вечірній розряд BESS',f0(eveDch),'кВт·год/рік','g')+
     kpi('Заряд від мережі',f0(grid),'кВт·год/рік','o')+
+    acKpi+
     kpi('Дохід BESS+СЕС',f0(totRev/fx),'USD/рік','g')+
     kpi('Витрати заряд',f0(totCost/fx),'USD/рік','o')+
     kpi('Чистий прибуток',f0(net/fx),'USD/рік (до обсл.)','g');
@@ -782,13 +875,19 @@ function kpi(l,v,s,c){
 }
 
 function renderResults(M,p) {
-  var h='<tr><th>Місяць</th><th>СЕС ген</th><th>→Сайт</th><th>→BESS</th><th>Втрачено</th><th>Заряд мережа</th><th>Розряд</th><th>Вит.заряд</th><th>Дох.BESS</th><th>Дох.СЕС</th><th>ПРИБУТОК</th></tr>';
-  var tots=new Array(10).fill(0), i;
+  var ac=toggleState.ac===1;
+  var acCols=ac?'<th>Прод.кВт·год</th><th>Дох.продажу</th>':'';
+  var h='<tr><th>Місяць</th><th>СЕС ген</th><th>→Сайт</th><th>→BESS</th><th>Втрачено</th><th>Заряд мережа</th><th>Розряд</th><th>Вит.заряд</th><th>Дох.BESS</th><th>Дох.СЕС</th>'+acCols+'<th>ПРИБУТОК</th></tr>';
+  var ncols=ac?12:10, tots=new Array(ncols).fill(0), i;
   for(i=0;i<12;i++){
-    var r=M[i], v=[r.solGen,r.solSite,r.solBess,r.solLost,r.grid,r.eveDch,r.totCost,r.totBESS,r.totSOL,r.net];
+    var r=M[i];
+    var v=[r.solGen,r.solSite,r.solBess,r.solLost,r.grid,r.eveDch,r.totCost,r.totBESS,r.totSOL];
+    if(ac){v.push(r.acSaleKwh);v.push(r.totAC);}
+    v.push(r.net);
     v.forEach(function(x,j){tots[j]+=x;});
+    var lastIdx=v.length-1;
     h+='<tr><td>'+MUAS[i]+'</td>'+v.map(function(x,j){
-      var cl=j===9?(x>=0?'pos':'neg'):'';
+      var cl=j===lastIdx?(x>=0?'pos':'neg'):'';
       return '<td class="'+cl+'">'+f0(x)+'</td>';
     }).join('')+'</tr>';
   }
@@ -812,19 +911,21 @@ function renderBP(M,p) {
     return r+'<td>'+fu(tot)+'</td></tr>';
   }
 
-  var mEve=[], mSol=[], mCost=[], mMaint=[], mCF=[];
+  var mEve=[], mSol=[], mAC=[], mCost=[], mMaint=[], mCF=[];
   for(i=0;i<12;i++){
     mEve.push(M[i].totBESS/fx*(1+corr)*degrad[0]);
     mSol.push(M[i].totSOL/fx*(1+corr)*degrad[0]);
+    mAC.push(M[i].totAC/fx*(1+corr)*degrad[0]);
     mCost.push(-M[i].totCost/fx);
     mMaint.push(-MAINT/12);
-    mCF.push(M[i].totBESS/fx*(1+corr)*degrad[0]+M[i].totSOL/fx*(1+corr)*degrad[0]-M[i].totCost/fx-MAINT/12);
+    mCF.push(M[i].totBESS/fx*(1+corr)*degrad[0]+M[i].totSOL/fx*(1+corr)*degrad[0]+M[i].totAC/fx*(1+corr)*degrad[0]-M[i].totCost/fx-MAINT/12);
   }
 
   var mb='';
   mb+='<tr class="sec"><td colspan="15">1. ДОХОДИ</td></tr>';
   mb+=mrow('&nbsp;&nbsp;Дохід BESS',0,mEve,'rev');
   mb+=mrow('&nbsp;&nbsp;Дохід СЕС',0,mSol,'rev');
+  if(toggleState.ac===1) mb+=mrow('&nbsp;&nbsp;Продаж в мережу (АС)',0,mAC,'rev');
   mb+='<tr class="sec"><td colspan="15">2. ВИТРАТИ</td></tr>';
   mb+=mrow('&nbsp;&nbsp;Заряд від мережі',0,mCost,'cost');
   mb+=mrow('&nbsp;&nbsp;Обслуговування',0,mMaint,'cost');
@@ -851,22 +952,26 @@ function renderBP(M,p) {
     return r+'</tr>';
   }
 
-  var yEve=[], ySol=[], yCost=[], yMaint=[], yRevComb=[];
+  var annAC=0;
+  for(i=0;i<12;i++) annAC+=M[i].totAC;
+  var yEve=[], ySol=[], yAC=[], yCost=[], yMaint=[], yRevComb=[];
   for(i=0;i<10;i++){
     yEve.push(annEve/fx*(1+corr)*degrad[i]);
     ySol.push(annSol/fx*(1+corr)*degrad[i]);
+    yAC.push(annAC/fx*(1+corr)*degrad[i]);
     yCost.push(-annCost/fx);
     yMaint.push(-MAINT);
-    yRevComb.push(annEve/fx*(1+corr)*degrad[i]+annSol/fx*(1+corr)*degrad[i]);
+    yRevComb.push(annEve/fx*(1+corr)*degrad[i]+annSol/fx*(1+corr)*degrad[i]+annAC/fx*(1+corr)*degrad[i]);
   }
   var yCF=[];
-  for(i=0;i<10;i++) yCF.push(yEve[i]+ySol[i]+yCost[i]+yMaint[i]);
+  for(i=0;i<10;i++) yCF.push(yEve[i]+ySol[i]+yAC[i]+yCost[i]+yMaint[i]);
 
   var yb='';
   yb+='<tr class="sec"><td colspan="12">1. ДОХОДИ</td></tr>';
   yb+=yrow('&nbsp;&nbsp;Дохід BESS+СЕС',0,yRevComb,'rev');
   yb+=yrow('&nbsp;&nbsp;з яких BESS',0,yEve,'rev');
   yb+=yrow('&nbsp;&nbsp;з яких СЕС',0,ySol,'rev');
+  if(toggleState.ac===1) yb+=yrow('&nbsp;&nbsp;з яких продаж в мережу (АС)',0,yAC,'rev');
   yb+='<tr class="sec"><td colspan="12">2. ВИТРАТИ</td></tr>';
   yb+=yrow('&nbsp;&nbsp;Заряд від мережі',0,yCost,'cost');
   yb+=yrow('&nbsp;&nbsp;Обслуговування',0,yMaint,'cost');
@@ -890,7 +995,7 @@ function renderBP(M,p) {
 
   // KPIs
   var tot10Rev=0, tot10Cost=0;
-  for(i=0;i<10;i++){tot10Rev+=yRevComb[i]; tot10Cost+=yCost[i]+yMaint[i];}
+  for(i=0;i<10;i++){tot10Rev+=yRevComb[i]; tot10Cost+=yCost[i]+yMaint[i];} // yRevComb already includes AC
   var net10=tot10Rev+tot10Cost;
   var roi=capex>0?net10/capex/10*100:0;
 
@@ -1013,8 +1118,12 @@ function resetAll() {
   document.getElementById('dchEnd').value   = 22;
   setToggle('sc', 0);
   setToggle('sd', 0);
+  setToggle('ac', 0);
   var scEl=document.getElementById('scEnd'); if(scEl) scEl.value=17;
+  var asSEl=document.getElementById('acSaleStart'); if(asSEl) asSEl.value=22;
+  var asEEl=document.getElementById('acSaleEnd');   if(asEEl) asEEl.value=6;
   updateSmartChargeUI();
+  updateActiveConsumerUI();
 
   // Consumption
   document.getElementById('wStart').value = 0;
@@ -1314,8 +1423,12 @@ function resetAll() {
   document.getElementById('dchEnd').value   = 22;
   setToggle('sc', 0);
   setToggle('sd', 0);
+  setToggle('ac', 0);
   var scEl=document.getElementById('scEnd'); if(scEl) scEl.value=17;
+  var asSEl=document.getElementById('acSaleStart'); if(asSEl) asSEl.value=22;
+  var asEEl=document.getElementById('acSaleEnd');   if(asEEl) asEEl.value=6;
   updateSmartChargeUI();
+  updateActiveConsumerUI();
 
   // Consumption
   document.getElementById('wStart').value = 0;
@@ -1615,8 +1728,12 @@ function resetAll() {
   document.getElementById('dchEnd').value   = 22;
   setToggle('sc', 0);
   setToggle('sd', 0);
+  setToggle('ac', 0);
   var scEl=document.getElementById('scEnd'); if(scEl) scEl.value=17;
+  var asSEl=document.getElementById('acSaleStart'); if(asSEl) asSEl.value=22;
+  var asEEl=document.getElementById('acSaleEnd');   if(asEEl) asEEl.value=6;
   updateSmartChargeUI();
+  updateActiveConsumerUI();
 
   // Consumption
   document.getElementById('wStart').value = 0;
@@ -1910,13 +2027,14 @@ function renderChart(M, p) {
   var hasBESS  = p.inst > 0;
   var hasSolar = p.solar.some(function(v){return v>0;});
 
-  var solSite=[], solLost=[], eveDch=[], cons=[], totRevK=[], totCostK=[], netK=[];
+  var solSite=[], solLost=[], eveDch=[], acSaleArr=[], cons=[], totRevK=[], totCostK=[], netK=[];
   for(var i=0;i<12;i++){
     solSite.push(Math.round(M[i].solSite));
     solLost.push(Math.round(M[i].solLost));
     eveDch.push(Math.round(M[i].eveDch));
+    acSaleArr.push(Math.round(M[i].acSaleKwh));
     cons.push(Math.round(p.cons[i]));
-    totRevK.push(Math.round((M[i].totBESS+M[i].totSOL)/1000));
+    totRevK.push(Math.round((M[i].totBESS+M[i].totSOL+M[i].totAC)/1000));
     totCostK.push(Math.round(-M[i].totCost/1000));
     netK.push(Math.round(M[i].net/1000));
   }
@@ -1942,14 +2060,22 @@ function renderChart(M, p) {
     });
   }
 
-  // 2. BESS discharge — orange line (only if BESS exists)
+  // 2. BESS discharge lines (only if BESS exists)
   if(hasBESS){
     datasets.push({
-      type:'line', label:'Розряд BESS (кВт·год)', data:eveDch,
+      type:'line', label:'BESS → самоспоживання (кВт·год)', data:eveDch,
       borderColor:'#E65100', backgroundColor:'rgba(230,81,0,0.15)',
       borderWidth:2.5, pointRadius:4, pointBackgroundColor:'#E65100',
       fill:false, tension:0.3, yAxisID:'y', order:1
     });
+    if(p.acMode){
+      datasets.push({
+        type:'line', label:'BESS → мережа, продаж (кВт·год)', data:acSaleArr,
+        borderColor:'#7B1FA2', backgroundColor:'rgba(123,31,162,0.12)',
+        borderWidth:2.5, pointRadius:4, pointBackgroundColor:'#7B1FA2',
+        fill:false, tension:0.3, yAxisID:'y', order:1
+      });
+    }
   }
 
   // 3. Consumption — grey bars LAST so solar scale is correct
@@ -2037,23 +2163,34 @@ function renderChart(M, p) {
   if(ctx3 && hasBESS) {
     if(bessChartInst){bessChartInst.destroy();bessChartInst=null;}
     var mdays=[31,28,31,30,31,30,31,31,30,31,30,31];
-    var bessPerDay = [];
+    var bessPerDay=[], acSalePerDay=[];
     for(var i=0;i<12;i++){
       bessPerDay.push(+(M[i].eveDch / mdays[i]).toFixed(1));
+      acSalePerDay.push(+(M[i].acSaleKwh / mdays[i]).toFixed(1));
+    }
+    var bessDatasets=[{
+      label:'BESS → самоспоживання (кВт·год/день)',
+      data: bessPerDay,
+      backgroundColor:'rgba(230,81,0,0.75)',
+      borderColor:'rgba(230,81,0,1)',
+      borderWidth:1,
+      borderRadius:0,
+      stack:'bess'
+    }];
+    if(p.acMode){
+      bessDatasets.push({
+        label:'BESS → мережа, продаж (кВт·год/день)',
+        data: acSalePerDay,
+        backgroundColor:'rgba(123,31,162,0.75)',
+        borderColor:'rgba(123,31,162,1)',
+        borderWidth:1,
+        borderRadius:4,
+        stack:'bess'
+      });
     }
     bessChartInst = new Chart(ctx3, {
       type:'bar',
-      data:{
-        labels: MUAS,
-        datasets:[{
-          label:'Розряд BESS (кВт·год/день)',
-          data: bessPerDay,
-          backgroundColor:'rgba(230,81,0,0.75)',
-          borderColor:'rgba(230,81,0,1)',
-          borderWidth:1,
-          borderRadius:4
-        }]
-      },
+      data:{ labels: MUAS, datasets: bessDatasets },
       options:{
         responsive:true, maintainAspectRatio:false,
         plugins:{
@@ -2061,15 +2198,15 @@ function renderChart(M, p) {
           tooltip:{
             callbacks:{
               label:function(ctx){
-                return ' Розряд: '+ctx.parsed.y.toFixed(1)+' кВт·год/день';
+                return ' '+ctx.dataset.label.split('(')[0].trim()+': '+ctx.parsed.y.toFixed(1)+' кВт·год/день';
               }
             }
           }
         },
         scales:{
-          x:{grid:{display:false}, ticks:{font:{size:12}}},
+          x:{grid:{display:false}, ticks:{font:{size:12}}, stacked:true},
           y:{
-            beginAtZero:true,
+            beginAtZero:true, stacked:true,
             title:{display:true, text:'кВт·год / день', font:{size:11}},
             ticks:{font:{size:11}},
             grid:{color:'rgba(0,0,0,0.06)'}
@@ -2173,9 +2310,12 @@ function getClientData() {
     ['fx',       gi('fx')],
     ['corr',     gi('corr')],
     ['scEnd',    gi('scEnd')],
-    ['scMode',   toggleState.sc],
-    ['sdMode',   toggleState.sd],
-    ['xsMode',   toggleState.xs],
+    ['scMode',      toggleState.sc],
+    ['sdMode',      toggleState.sd],
+    ['xsMode',      toggleState.xs],
+    ['acMode',      toggleState.ac],
+    ['acSaleStart', gi('acSaleStart')||22],
+    ['acSaleEnd',   gi('acSaleEnd')||6],
     ['modelName', document.getElementById('modelName').value.trim()]
   ];
   for(var i=0;i<12;i++) data.push(['cons_'+i, gi('cons'+i)]);
@@ -2234,29 +2374,30 @@ function exportPDF() {
   var modeLabel= (scMode===1?'SmartCharge':'Рівномірний')+' / '+(sdMode===1?'SmartDischarge':'Рівномірний');
 
   // ── Annual KPIs ───────────────────────────────────────────────
-  var annEve=0,annSol=0,annCost=0,annNet=0;
+  var annEve=0,annSol=0,annAC=0,annCost=0,annNet=0;
   var solGen=0,solSite=0,solLost=0,annDch=0,annGrid=0;
   for(var ki=0;ki<12;ki++){
-    annEve+=M[ki].totBESS; annSol+=M[ki].totSOL;
+    annEve+=M[ki].totBESS; annSol+=M[ki].totSOL; annAC+=M[ki].totAC;
     annCost+=M[ki].totCost; annNet+=M[ki].net;
     solGen+=M[ki].solGen; solSite+=M[ki].solSite;
     solLost+=M[ki].solLost; annDch+=M[ki].eveDch; annGrid+=M[ki].grid;
   }
-  var annRev=annEve+annSol;
+  var annRev=annEve+annSol+annAC;
   var lostPct=solGen>0?(solLost/solGen*100).toFixed(1):'0.0';
 
   // ── 10-year BP ────────────────────────────────────────────────
-  var yEve=[],ySol=[],yCost=[],yCF=[];
+  var yEve=[],ySol=[],yAC=[],yCost=[],yCF=[];
   for(var yi=0;yi<10;yi++){
     yEve.push(annEve/fx*(1+corr)*degrad[yi]);
     ySol.push(annSol/fx*(1+corr)*degrad[yi]);
+    yAC.push(annAC/fx*(1+corr)*degrad[yi]);
     yCost.push(-annCost/fx);
-    yCF.push(yEve[yi]+ySol[yi]+yCost[yi]-MAINT);
+    yCF.push(yEve[yi]+ySol[yi]+yAC[yi]+yCost[yi]-MAINT);
   }
   var cumArr=[],cumVal=-capexUSD;
   for(var ci=0;ci<10;ci++){cumVal+=yCF[ci]; cumArr.push(cumVal);}
   var tot10Rev=0,tot10Cost=0;
-  for(var ti=0;ti<10;ti++){tot10Rev+=yEve[ti]+ySol[ti]; tot10Cost+=yCost[ti]-MAINT;}
+  for(var ti=0;ti<10;ti++){tot10Rev+=yEve[ti]+ySol[ti]+yAC[ti]; tot10Cost+=yCost[ti]-MAINT;}
   var net10=tot10Rev+tot10Cost;
   var pb=999, prevCum=-capexUSD;
   for(var pi2=0;pi2<10;pi2++){
@@ -2515,7 +2656,8 @@ function importClient(event) {
       for(var i=1;i<rows.length;i++) if(rows[i][0]) map[String(rows[i][0])]=rows[i][1];
 
       ['inst','maxPow','solEnd','tuStart','tuEnd','dchStart','dchEnd',
-       'wStart','wEnd','solKw','fixPrice','vat','dst','capexB','capexS','fx','corr','scEnd'].forEach(function(f){
+       'wStart','wEnd','solKw','fixPrice','vat','dst','capexB','capexS','fx','corr','scEnd',
+       'acSaleStart','acSaleEnd'].forEach(function(f){
         if(map[f]!==undefined){var el=document.getElementById(f);if(el)el.value=map[f];}
       });
       if(map['vatMode']!==undefined)   setToggle('vm', parseInt(map['vatMode'])||0);
@@ -2524,6 +2666,7 @@ function importClient(event) {
       if(map['scMode']!==undefined) setToggle('sc', parseInt(map['scMode'])||0);
       if(map['sdMode']!==undefined) setToggle('sd', parseInt(map['sdMode'])||0);
       if(map['xsMode']!==undefined) setToggle('xs', parseInt(map['xsMode'])||0);
+      if(map['acMode']!==undefined){ setToggle('ac', parseInt(map['acMode'])||0); updateActiveConsumerUI(); }
       updateSmartChargeUI();
       updateExistingSolarUI();
       for(var i=0;i<12;i++){
