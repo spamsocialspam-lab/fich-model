@@ -163,10 +163,17 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
     </div>
   </div>
   <div class="trow" style="margin-top:6px">
+    <span class="lbl">Тип об'єкта</span>
+    <div class="tgrow">
+      <button class="tgbtn on" data-tg="pp" data-val="0" onclick="setToggle('pp',0);updatePowerPlantUI()">Зі споживачем</button>
+      <button class="tgbtn" data-tg="pp" data-val="1" onclick="setToggle('pp',1);setToggle('ac',0);updatePowerPlantUI();updateActiveConsumerUI()">⚡ Електростанція (без споживача)</button>
+    </div>
+  </div>
+  <div class="trow" style="margin-top:6px">
     <span class="lbl">Активний споживач</span>
     <div class="tgrow">
       <button class="tgbtn on" data-tg="ac" data-val="0" onclick="setToggle('ac',0);updateActiveConsumerUI()">Вимк.</button>
-      <button class="tgbtn" data-tg="ac" data-val="1" onclick="setToggle('ac',1);updateActiveConsumerUI()">🔋 Активний споживач</button>
+      <button class="tgbtn" data-tg="ac" data-val="1" onclick="setToggle('ac',1);setToggle('pp',0);updateActiveConsumerUI();updatePowerPlantUI()">🔋 Активний споживач</button>
     </div>
   </div>
   <div class="row" id="acSaleStartRow" style="display:none"><span class="lbl">Початок вікна продажу</span><input class="inp" id="acSaleStart" value="22" oninput="updateCalc()"><span class="unit">год</span></div>
@@ -215,7 +222,7 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
 </div>
 
 <div>
-<div class="card">
+<div class="card" id="consCard">
 <div class="chdr">Б. Споживання об'єкту</div>
 <div class="cbdy">
   <div class="row"><span class="lbl">Початок робочого дня</span><input class="inp" id="wStart" value="8" oninput="updateCalc()"><span class="unit">год</span></div>
@@ -361,7 +368,7 @@ function showTab(name) {
 }
 
 // Toggle buttons
-var toggleState = {pm:0, vm:0, dm:0, sc:0, sd:0, xs:0, ac:0};
+var toggleState = {pm:0, vm:0, dm:0, sc:0, sd:0, xs:0, ac:0, pp:0};
 function setToggle(key, val) {
   toggleState[key] = val;
   var btns = document.querySelectorAll('[data-tg="'+key+'"]');
@@ -395,15 +402,16 @@ function updateExistingSolarUI() {
 
 function updateActiveConsumerUI() {
   var ac = toggleState.ac === 1;
-  document.getElementById('acSaleStartRow').style.display = ac ? '' : 'none';
-  document.getElementById('acSaleEndRow').style.display   = ac ? '' : 'none';
-  // Grey out discharge window fields (not used in AC mode)
+  var pp = toggleState.pp === 1;
+  document.getElementById('acSaleStartRow').style.display = (ac||pp) ? '' : 'none';
+  document.getElementById('acSaleEndRow').style.display   = (ac||pp) ? '' : 'none';
+  // Grey out discharge window fields (not used in AC or Power Plant mode)
   ['dchStart','dchEnd'].forEach(function(id){
     var row = document.getElementById(id) ? document.getElementById(id).closest('.row') : null;
     if (!row) return;
-    row.style.opacity = ac ? '0.35' : '1';
+    row.style.opacity = (ac||pp) ? '0.35' : '1';
     var inp = document.getElementById(id);
-    if (inp) { inp.disabled = ac; inp.style.cursor = ac ? 'not-allowed' : ''; }
+    if (inp) { inp.disabled = (ac||pp); inp.style.cursor = (ac||pp) ? 'not-allowed' : ''; }
   });
   var fixBtn = document.querySelector('[data-tg="pm"][data-val="1"]');
   if (ac) {
@@ -412,6 +420,30 @@ function updateActiveConsumerUI() {
   } else {
     if (fixBtn) fixBtn.classList.remove('disabled');
   }
+  // Power Plant mode is mutually exclusive with Active Consumer — grey out the pp buttons while ac is on
+  var ppBtns = document.querySelectorAll('[data-tg="pp"]');
+  ppBtns.forEach(function(b){ b.classList.toggle('disabled', ac); });
+  validateInputs();
+}
+
+function updatePowerPlantUI() {
+  var pp = toggleState.pp === 1;
+  var ac = toggleState.ac === 1;
+  // No consumer in Power Plant mode — hide the consumption card entirely
+  var cc = document.getElementById('consCard');
+  if (cc) cc.style.display = pp ? 'none' : '';
+  document.getElementById('acSaleStartRow').style.display = (pp||ac) ? '' : 'none';
+  document.getElementById('acSaleEndRow').style.display   = (pp||ac) ? '' : 'none';
+  ['dchStart','dchEnd'].forEach(function(id){
+    var row = document.getElementById(id) ? document.getElementById(id).closest('.row') : null;
+    if (!row) return;
+    row.style.opacity = (pp||ac) ? '0.35' : '1';
+    var inp = document.getElementById(id);
+    if (inp) { inp.disabled = (pp||ac); inp.style.cursor = (pp||ac) ? 'not-allowed' : ''; }
+  });
+  // Active Consumer is mutually exclusive with Power Plant — grey out the ac buttons while pp is on
+  var acBtns = document.querySelectorAll('[data-tg="ac"]');
+  acBtns.forEach(function(b){ b.classList.toggle('disabled', pp); });
   validateInputs();
 }
 
@@ -437,8 +469,8 @@ function validateInputs() {
   var tuStart=gi('tuStart'), tuEnd=gi('tuEnd'), solEnd=gi('solEnd');
   var msgs=[], ids=[];
 
-  // Check discharge window vs working hours (skip in AC mode — discharge window is unused)
-  if (!toggleState.ac && dchEnd > 0 && wEnd > 0 && dchEnd > wEnd) {
+  // Check discharge window vs working hours (skip in AC or Power Plant mode — discharge window is unused)
+  if (!toggleState.ac && !toggleState.pp && dchEnd > 0 && wEnd > 0 && dchEnd > wEnd) {
     ids.push('dchEnd','wEnd');
     msgs.push('Кінець розряду ('+dchEnd+') перевищує кінець робочого дня ('+wEnd+') — год. '+((wEnd+1))+'–'+dchEnd+' не дадуть розряду');
   }
@@ -581,7 +613,47 @@ function simMonth(mi, p) {
     pr = prMonth[String(d)] || [];
     sdPerHrDay={};
 
-    if (sc && hasB) {
+    if (p.ppMode && hasB) {
+      // ── Power Plant mode (no consumer; greedy solar storage, sell overflow + BESS exports at DAM price) ──
+      bess=carryOver;
+      for(h=1;h<=24;h++){
+        sh=(wt[h]||0)*spd;
+        R.solGen+=sh;
+        var pricePP=(pr[h-1]||0)/1000;
+        var inSalePP=p.acSaleStart<=p.acSaleEnd?(h>=p.acSaleStart&&h<=p.acSaleEnd):(h>=p.acSaleStart||h<=p.acSaleEnd);
+        var inTuPP=(h>=p.tuStart&&h<=p.tuEnd);
+        if (inSalePP) {
+          // Sale-window hour: sell all solar directly + discharge/sell BESS (no charging this hour)
+          R.solSite+=sh;
+          R.solRev +=sh*pricePP;
+          var dchPP=Math.min(p.maxPow,bess);
+          bess-=dchPP;
+          R.acSaleKwh+=dchPP;
+          R.acSaleRev+=dchPP*pricePP;
+        } else if (inTuPP) {
+          // Top-up window: store solar first (greedy), then top up from grid with remaining power budget
+          var solChPP=Math.min(sh,p.maxPow,Math.max(0,usable-bess));
+          bess+=solChPP;
+          R.solBess+=solChPP;
+          var ovfPP=sh-solChPP;
+          R.solSite+=ovfPP;
+          R.solRev +=ovfPP*pricePP;
+          var gridChPP=Math.min(Math.max(0,p.maxPow-solChPP),Math.max(0,usable-bess));
+          bess+=gridChPP;
+          R.grid+=gridChPP;
+          R.gridCost+=gridChPP*pricePP;
+        } else {
+          // Regular hour: store solar greedily, sell any overflow directly at DAM price
+          var solChPP2=Math.min(sh,p.maxPow,Math.max(0,usable-bess));
+          bess+=solChPP2;
+          R.solBess+=solChPP2;
+          var ovfPP2=sh-solChPP2;
+          R.solSite+=ovfPP2;
+          R.solRev +=ovfPP2*pricePP;
+        }
+      }
+
+    } else if (sc && hasB) {
       // ── SmartCharge mode ───────────────────────────────────────────────────
       // Step 1: find N cheapest hours in charge window [1..scEnd], skip discharge hours
       var chargeOpts=[], hh, ci;
@@ -821,6 +893,7 @@ function runModel() {
     scEnd:    gi('scEnd'),
     sdMode:      toggleState.sd,
     acMode:      toggleState.ac,
+    ppMode:      toggleState.pp===1,
     acSaleStart: gi('acSaleStart')||22,
     acSaleEnd:   gi('acSaleEnd')||6,
     cons:     [], solar: [], degrad: []
@@ -856,12 +929,13 @@ function renderKPI(M,p) {
   }
   var fx=gi('fx');
   var lp = solGen>0 ? (solLost/solGen*100).toFixed(1) : '0.0';
-  var acKpi = toggleState.ac===1 ?
-    kpi('Продаж в мережу (АС)',f0(acSaleKwh),'кВт·год/рік','o')+
+  var pp = toggleState.pp===1;
+  var acKpi = (toggleState.ac===1||pp) ?
+    kpi(pp?'Розряд BESS → мережа':'Продаж в мережу (АС)',f0(acSaleKwh),'кВт·год/рік','o')+
     kpi('Дохід від продажу',f0(totAC/fx),'USD/рік','g') : '';
   document.getElementById('kpiArea').innerHTML=
     kpi('Річна генерація СЕС',f0(solGen),'кВт·год/рік','s')+
-    kpi('СЕС → споживачу',f0(solSite),'кВт·год/рік','g')+
+    kpi(pp?'СЕС → пряма реалізація':'СЕС → споживачу',f0(solSite),'кВт·год/рік','g')+
     kpi('⚠ Втрачено',f0(solLost),lp+'% від генерації','r')+
     kpi('Вечірній розряд BESS',f0(eveDch),'кВт·год/рік','g')+
     kpi('Заряд від мережі',f0(grid),'кВт·год/рік','o')+
@@ -875,7 +949,7 @@ function kpi(l,v,s,c){
 }
 
 function renderResults(M,p) {
-  var ac=toggleState.ac===1;
+  var ac=toggleState.ac===1||toggleState.pp===1;
   var acCols=ac?'<th>Прод.кВт·год</th><th>Дох.продажу</th>':'';
   var h='<tr><th>Місяць</th><th>СЕС ген</th><th>→Сайт</th><th>→BESS</th><th>Втрачено</th><th>Заряд мережа</th><th>Розряд</th><th>Вит.заряд</th><th>Дох.BESS</th><th>Дох.СЕС</th>'+acCols+'<th>ПРИБУТОК</th></tr>';
   var ncols=ac?12:10, tots=new Array(ncols).fill(0), i;
@@ -921,11 +995,12 @@ function renderBP(M,p) {
     mCF.push(M[i].totBESS/fx*(1+corr)*degrad[0]+M[i].totSOL/fx*(1+corr)*degrad[0]+M[i].totAC/fx*(1+corr)*degrad[0]-M[i].totCost/fx-MAINT/12);
   }
 
+  var ppBP = toggleState.pp===1;
   var mb='';
   mb+='<tr class="sec"><td colspan="15">1. ДОХОДИ</td></tr>';
   mb+=mrow('&nbsp;&nbsp;Дохід BESS',0,mEve,'rev');
-  mb+=mrow('&nbsp;&nbsp;Дохід СЕС',0,mSol,'rev');
-  if(toggleState.ac===1) mb+=mrow('&nbsp;&nbsp;Продаж в мережу (АС)',0,mAC,'rev');
+  mb+=mrow(ppBP?'&nbsp;&nbsp;Дохід СЕС (прямий продаж)':'&nbsp;&nbsp;Дохід СЕС',0,mSol,'rev');
+  if(toggleState.ac===1||ppBP) mb+=mrow(ppBP?'&nbsp;&nbsp;Розряд BESS → мережу':'&nbsp;&nbsp;Продаж в мережу (АС)',0,mAC,'rev');
   mb+='<tr class="sec"><td colspan="15">2. ВИТРАТИ</td></tr>';
   mb+=mrow('&nbsp;&nbsp;Заряд від мережі',0,mCost,'cost');
   mb+=mrow('&nbsp;&nbsp;Обслуговування',0,mMaint,'cost');
@@ -970,8 +1045,8 @@ function renderBP(M,p) {
   yb+='<tr class="sec"><td colspan="12">1. ДОХОДИ</td></tr>';
   yb+=yrow('&nbsp;&nbsp;Дохід BESS+СЕС',0,yRevComb,'rev');
   yb+=yrow('&nbsp;&nbsp;з яких BESS',0,yEve,'rev');
-  yb+=yrow('&nbsp;&nbsp;з яких СЕС',0,ySol,'rev');
-  if(toggleState.ac===1) yb+=yrow('&nbsp;&nbsp;з яких продаж в мережу (АС)',0,yAC,'rev');
+  yb+=yrow(ppBP?'&nbsp;&nbsp;з яких СЕС (прямий продаж)':'&nbsp;&nbsp;з яких СЕС',0,ySol,'rev');
+  if(toggleState.ac===1||ppBP) yb+=yrow(ppBP?'&nbsp;&nbsp;з яких розряд BESS → мережу':'&nbsp;&nbsp;з яких продаж в мережу (АС)',0,yAC,'rev');
   yb+='<tr class="sec"><td colspan="12">2. ВИТРАТИ</td></tr>';
   yb+=yrow('&nbsp;&nbsp;Заряд від мережі',0,yCost,'cost');
   yb+=yrow('&nbsp;&nbsp;Обслуговування',0,yMaint,'cost');
@@ -1119,11 +1194,13 @@ function resetAll() {
   setToggle('sc', 0);
   setToggle('sd', 0);
   setToggle('ac', 0);
+  setToggle('pp', 0);
   var scEl=document.getElementById('scEnd'); if(scEl) scEl.value=17;
   var asSEl=document.getElementById('acSaleStart'); if(asSEl) asSEl.value=22;
   var asEEl=document.getElementById('acSaleEnd');   if(asEEl) asEEl.value=6;
   updateSmartChargeUI();
   updateActiveConsumerUI();
+  updatePowerPlantUI();
 
   // Consumption
   document.getElementById('wStart').value = 0;
@@ -1424,11 +1501,13 @@ function resetAll() {
   setToggle('sc', 0);
   setToggle('sd', 0);
   setToggle('ac', 0);
+  setToggle('pp', 0);
   var scEl=document.getElementById('scEnd'); if(scEl) scEl.value=17;
   var asSEl=document.getElementById('acSaleStart'); if(asSEl) asSEl.value=22;
   var asEEl=document.getElementById('acSaleEnd');   if(asEEl) asEEl.value=6;
   updateSmartChargeUI();
   updateActiveConsumerUI();
+  updatePowerPlantUI();
 
   // Consumption
   document.getElementById('wStart').value = 0;
@@ -1729,11 +1808,13 @@ function resetAll() {
   setToggle('sc', 0);
   setToggle('sd', 0);
   setToggle('ac', 0);
+  setToggle('pp', 0);
   var scEl=document.getElementById('scEnd'); if(scEl) scEl.value=17;
   var asSEl=document.getElementById('acSaleStart'); if(asSEl) asSEl.value=22;
   var asEEl=document.getElementById('acSaleEnd');   if(asEEl) asEEl.value=6;
   updateSmartChargeUI();
   updateActiveConsumerUI();
+  updatePowerPlantUI();
 
   // Consumption
   document.getElementById('wStart').value = 0;
@@ -2049,7 +2130,7 @@ function renderChart(M, p) {
   // 1. Solar stacked bars (green + red on top) — only if solar exists
   if(hasSolar){
     datasets.push({
-      type:'bar', label:'СЕС → Сайт (кВт·год)', data:solSite,
+      type:'bar', label:(p.ppMode?'СЕС → Пряма реалізація (кВт·год)':'СЕС → Сайт (кВт·год)'), data:solSite,
       backgroundColor:'rgba(46,160,67,0.85)', borderColor:'rgba(46,160,67,1)',
       borderWidth:1, stack:'solar', yAxisID:'y', order:2
     });
@@ -2068,7 +2149,7 @@ function renderChart(M, p) {
       borderWidth:2.5, pointRadius:4, pointBackgroundColor:'#E65100',
       fill:false, tension:0.3, yAxisID:'y', order:1
     });
-    if(p.acMode){
+    if(p.acMode||p.ppMode){
       datasets.push({
         type:'line', label:'BESS → мережа, продаж (кВт·год)', data:acSaleArr,
         borderColor:'#7B1FA2', backgroundColor:'rgba(123,31,162,0.12)',
@@ -2078,12 +2159,14 @@ function renderChart(M, p) {
     }
   }
 
-  // 3. Consumption — grey bars LAST so solar scale is correct
-  datasets.push({
-    type:'bar', label:'Споживання (кВт·год)', data:cons,
-    backgroundColor:'rgba(120,130,150,0.30)', borderColor:'rgba(120,130,150,0.6)',
-    borderWidth:1.5, yAxisID:'y', order:5
-  });
+  // 3. Consumption — grey bars LAST so solar scale is correct (no consumer in Power Plant mode)
+  if(!p.ppMode){
+    datasets.push({
+      type:'bar', label:'Споживання (кВт·год)', data:cons,
+      backgroundColor:'rgba(120,130,150,0.30)', borderColor:'rgba(120,130,150,0.6)',
+      borderWidth:1.5, yAxisID:'y', order:5
+    });
+  }
 
   mainChartInst=new Chart(ctx1,{
     data:{labels:labels, datasets:datasets},
@@ -2177,7 +2260,7 @@ function renderChart(M, p) {
       borderRadius:0,
       stack:'bess'
     }];
-    if(p.acMode){
+    if(p.acMode||p.ppMode){
       bessDatasets.push({
         label:'BESS → мережа, продаж (кВт·год/день)',
         data: acSalePerDay,
@@ -2314,6 +2397,7 @@ function getClientData() {
     ['sdMode',      toggleState.sd],
     ['xsMode',      toggleState.xs],
     ['acMode',      toggleState.ac],
+    ['ppMode',      toggleState.pp],
     ['acSaleStart', gi('acSaleStart')||22],
     ['acSaleEnd',   gi('acSaleEnd')||6],
     ['modelName', document.getElementById('modelName').value.trim()]
@@ -2667,6 +2751,7 @@ function importClient(event) {
       if(map['sdMode']!==undefined) setToggle('sd', parseInt(map['sdMode'])||0);
       if(map['xsMode']!==undefined) setToggle('xs', parseInt(map['xsMode'])||0);
       if(map['acMode']!==undefined){ setToggle('ac', parseInt(map['acMode'])||0); updateActiveConsumerUI(); }
+      if(map['ppMode']!==undefined){ setToggle('pp', parseInt(map['ppMode'])||0); updatePowerPlantUI(); }
       updateSmartChargeUI();
       updateExistingSolarUI();
       for(var i=0;i<12;i++){
@@ -2690,6 +2775,8 @@ window.onload=function(){
   buildTables();
   buildPriceTable();
   updateSmartChargeUI();
+  updateActiveConsumerUI();
+  updatePowerPlantUI();
   runModel();
 };
 </script></body></html>
