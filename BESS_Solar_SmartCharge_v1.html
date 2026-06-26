@@ -178,6 +178,18 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;
   </div>
   <div class="row" id="acSaleStartRow" style="display:none"><span class="lbl">Початок вікна продажу</span><input class="inp" id="acSaleStart" value="22" oninput="updateCalc()"><span class="unit">год</span></div>
   <div class="row" id="acSaleEndRow" style="display:none"><span class="lbl">Кінець вікна продажу</span><input class="inp" id="acSaleEnd" value="6" oninput="updateCalc()"><span class="unit">год</span></div>
+  <div class="trow" id="cyRow" style="display:none;margin-top:6px">
+    <span class="lbl">Цикли BESS (тест)</span>
+    <div class="tgrow">
+      <button class="tgbtn on" data-tg="cy" data-val="0" onclick="setToggle('cy',0);updateCycleUI()">1 цикл</button>
+      <button class="tgbtn" data-tg="cy" data-val="1" onclick="setToggle('cy',1);updateCycleUI()">⚡ 2 цикли</button>
+    </div>
+  </div>
+  <div class="note" id="cy2Note" style="display:none;margin:6px 0 4px">⚠ Тестовий режим. Вікно 2 не повинно перекриватись з вікном 1. Дефолтні години — орієнтовні, перевірте проти реальних цін РДН.</div>
+  <div class="row" id="tuStart2Row" style="display:none"><span class="lbl">Топ-ап вікно 2: початок</span><input class="inp" id="tuStart2" value="11" oninput="updateCalc()"><span class="unit">год</span></div>
+  <div class="row" id="tuEnd2Row" style="display:none"><span class="lbl">Топ-ап вікно 2: кінець</span><input class="inp" id="tuEnd2" value="14" oninput="updateCalc()"><span class="unit">год</span></div>
+  <div class="row" id="acSaleStart2Row" style="display:none"><span class="lbl">Вікно продажу 2: початок</span><input class="inp" id="acSaleStart2" value="7" oninput="updateCalc()"><span class="unit">год</span></div>
+  <div class="row" id="acSaleEnd2Row" style="display:none"><span class="lbl">Вікно продажу 2: кінець</span><input class="inp" id="acSaleEnd2" value="9" oninput="updateCalc()"><span class="unit">год</span></div>
 </div></div>
 
 <div class="card">
@@ -368,7 +380,8 @@ function showTab(name) {
 }
 
 // Toggle buttons
-var toggleState = {pm:0, vm:0, dm:0, sc:0, sd:0, xs:0, ac:0, pp:0};
+var toggleState = {pm:0, vm:0, dm:0, sc:0, sd:0, xs:0, ac:0, pp:0, cy:0};
+var DEGRAD_2CYCLE=[1.000,0.9625,0.9250,0.8920,0.8635,0.8365,0.8125,0.7885,0.7660,0.7435]; // ~1.5x steeper than DEGRAD (loss = 1.5x base loss), for PP 2-cycle test mode
 function setToggle(key, val) {
   toggleState[key] = val;
   var btns = document.querySelectorAll('[data-tg="'+key+'"]');
@@ -444,6 +457,29 @@ function updatePowerPlantUI() {
   // Active Consumer is mutually exclusive with Power Plant — grey out the ac buttons while pp is on
   var acBtns = document.querySelectorAll('[data-tg="ac"]');
   acBtns.forEach(function(b){ b.classList.toggle('disabled', pp); });
+  // 2-cycle toggle is a Power Plant-only test feature — hide entirely outside pp mode
+  var cyRow = document.getElementById('cyRow');
+  if (cyRow) cyRow.style.display = pp ? 'flex' : 'none';
+  if (!pp && toggleState.cy===1) { setToggle('cy',0); }
+  updateCycleUI();
+  validateInputs();
+}
+
+// 2-cycle (test) mode — Power Plant only: show/hide window-2 fields, auto-fill degradation curve
+function updateCycleUI() {
+  var pp = toggleState.pp === 1;
+  var cy = pp && toggleState.cy === 1;
+  ['cy2Note','tuStart2Row','tuEnd2Row','acSaleStart2Row','acSaleEnd2Row'].forEach(function(id){
+    var row = document.getElementById(id);
+    if (row) row.style.display = cy ? '' : 'none';
+  });
+  // Auto-fill degradation table with the steeper (2-cycle) or default curve, same pattern as autoFillSolar().
+  // Runs only when the 1-cycle/2-cycle toggle is flipped — re-flipping will re-apply and overwrite manual edits.
+  var src = cy ? DEGRAD_2CYCLE : DEGRAD;
+  for (var i=0;i<10;i++) {
+    var el = document.getElementById('deg'+i);
+    if (el) el.value = src[i];
+  }
   validateInputs();
 }
 
@@ -495,8 +531,29 @@ function validateInputs() {
     }
   }
 
+  // Power Plant 2-cycle (test) checks — window 1 vs window 2 must not overlap (sale windows may wrap midnight)
+  if (toggleState.pp===1 && toggleState.cy===1) {
+    var windows=[
+      ['tuStart','tuEnd','Топ-ап 1'],
+      ['tuStart2','tuEnd2','Топ-ап 2'],
+      ['acSaleStart','acSaleEnd','Продаж 1'],
+      ['acSaleStart2','acSaleEnd2','Продаж 2']
+    ];
+    for (var wi=0; wi<windows.length; wi++) {
+      for (var wj=wi+1; wj<windows.length; wj++) {
+        var s1=gi(windows[wi][0]), e1=gi(windows[wi][1]);
+        var s2=gi(windows[wj][0]), e2=gi(windows[wj][1]);
+        if (rangesOverlap(s1,e1,s2,e2)) {
+          ids.push(windows[wi][0],windows[wi][1],windows[wj][0],windows[wj][1]);
+          msgs.push(windows[wi][2]+' перекривається з '+windows[wj][2]);
+        }
+      }
+    }
+  }
+
   // Apply/clear styles
-  ['wEnd','dchStart','dchEnd','tuStart','tuEnd','solEnd'].forEach(function(id){
+  ['wEnd','dchStart','dchEnd','tuStart','tuEnd','solEnd',
+   'tuStart2','tuEnd2','acSaleStart','acSaleEnd','acSaleStart2','acSaleEnd2'].forEach(function(id){
     var el=document.getElementById(id); if(el) el.classList.remove('err');
   });
   ids.forEach(function(id){
@@ -513,6 +570,20 @@ function validateInputs() {
       w.classList.remove('show');
     }
   }
+}
+
+// Hour-range overlap check, midnight-wrap aware (start>end means the range wraps through midnight)
+function expandHourRange(s,e) {
+  var set={};
+  if (s<=0 || e<=0) return set;
+  if (s<=e) { for (var h=s; h<=e; h++) set[h]=true; }
+  else { for (var h=s; h<=24; h++) set[h]=true; for (var h=1; h<=e; h++) set[h]=true; }
+  return set;
+}
+function rangesOverlap(s1,e1,s2,e2) {
+  var a=expandHourRange(s1,e1), b=expandHourRange(s2,e2);
+  for (var k in a) if (b[k]) return true;
+  return false;
 }
 
 // ── Dynamic DAM stats helpers ──────────────────────────────────────────────
@@ -622,6 +693,13 @@ function simMonth(mi, p) {
         var pricePP=(pr[h-1]||0)/1000;
         var inSalePP=p.acSaleStart<=p.acSaleEnd?(h>=p.acSaleStart&&h<=p.acSaleEnd):(h>=p.acSaleStart||h<=p.acSaleEnd);
         var inTuPP=(h>=p.tuStart&&h<=p.tuEnd);
+        if (p.cyMode) {
+          // 2-cycle test mode: OR in window 2 (sale window 2 may also wrap midnight)
+          var inSalePP2=p.acSaleStart2<=p.acSaleEnd2?(h>=p.acSaleStart2&&h<=p.acSaleEnd2):(h>=p.acSaleStart2||h<=p.acSaleEnd2);
+          var inTuPP2=(h>=p.tuStart2&&h<=p.tuEnd2);
+          inSalePP=inSalePP||inSalePP2;
+          inTuPP=inTuPP||inTuPP2;
+        }
         if (inSalePP) {
           // Sale-window hour: sell all solar directly + discharge/sell BESS (no charging this hour)
           R.solSite+=sh;
@@ -896,6 +974,11 @@ function runModel() {
     ppMode:      toggleState.pp===1,
     acSaleStart: gi('acSaleStart')||22,
     acSaleEnd:   gi('acSaleEnd')||6,
+    cyMode:      toggleState.pp===1 && toggleState.cy===1,
+    tuStart2:    gi('tuStart2'),
+    tuEnd2:      gi('tuEnd2'),
+    acSaleStart2: gi('acSaleStart2'),
+    acSaleEnd2:   gi('acSaleEnd2'),
     cons:     [], solar: [], degrad: []
   };
   var i;
@@ -2400,6 +2483,11 @@ function getClientData() {
     ['ppMode',      toggleState.pp],
     ['acSaleStart', gi('acSaleStart')||22],
     ['acSaleEnd',   gi('acSaleEnd')||6],
+    ['cyMode',        toggleState.cy],
+    ['tuStart2',      gi('tuStart2')],
+    ['tuEnd2',        gi('tuEnd2')],
+    ['acSaleStart2',  gi('acSaleStart2')],
+    ['acSaleEnd2',    gi('acSaleEnd2')],
     ['modelName', document.getElementById('modelName').value.trim()]
   ];
   for(var i=0;i<12;i++) data.push(['cons_'+i, gi('cons'+i)]);
@@ -2741,7 +2829,7 @@ function importClient(event) {
 
       ['inst','maxPow','solEnd','tuStart','tuEnd','dchStart','dchEnd',
        'wStart','wEnd','solKw','fixPrice','vat','dst','capexB','capexS','fx','corr','scEnd',
-       'acSaleStart','acSaleEnd'].forEach(function(f){
+       'acSaleStart','acSaleEnd','tuStart2','tuEnd2','acSaleStart2','acSaleEnd2'].forEach(function(f){
         if(map[f]!==undefined){var el=document.getElementById(f);if(el)el.value=map[f];}
       });
       if(map['vatMode']!==undefined)   setToggle('vm', parseInt(map['vatMode'])||0);
@@ -2752,6 +2840,9 @@ function importClient(event) {
       if(map['xsMode']!==undefined) setToggle('xs', parseInt(map['xsMode'])||0);
       if(map['acMode']!==undefined){ setToggle('ac', parseInt(map['acMode'])||0); updateActiveConsumerUI(); }
       if(map['ppMode']!==undefined){ setToggle('pp', parseInt(map['ppMode'])||0); updatePowerPlantUI(); }
+      // cyMode (2-cycle test, PP-only) must be applied after ppMode above, since updateCycleUI()
+      // checks toggleState.pp to decide whether to show the cycle-2 rows at all.
+      if(map['cyMode']!==undefined){ setToggle('cy', parseInt(map['cyMode'])||0); updateCycleUI(); }
       updateSmartChargeUI();
       updateExistingSolarUI();
       for(var i=0;i<12;i++){
